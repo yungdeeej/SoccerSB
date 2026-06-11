@@ -69,4 +69,12 @@ tests/                   Vitest unit tests
 ## Phase status
 
 - **Phase 0 (Foundation) — complete.** Schema deployed, lean seed verified, money-path utils tested, health endpoint green.
-- **Next: Phase 1 (Market Intelligence Skeleton)** — The Odds API integration, odds polling, slate dashboard, best-price identification, manual bet ledger, Telegram channel. Requires operator approval + `ODDS_API_KEY` / `TELEGRAM_BOT_TOKEN`.
+- **Phase 1 (Market Intelligence Skeleton) — complete.** Fixtures ingestion + adaptive odds polling from The Odds API (zod-validated, quota-aware), market state computation (consensus / Pinnacle no-vig anchor / best accessible price / movement), terminal dashboard (`/` slate + edge board, `/matches/:id` detail, `/bets` ledger), atomic bet placement / deposit / settlement workflows, Telegram `/status` skeleton, full `agent_runs` logging.
+  - **To go live:** set `ODDS_API_KEY` (fixtures + polling start automatically on boot) and `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `.env`, then restart. Without keys the server runs with manual workflows only.
+- **Next: Phase 2 (Quant + Tactician)** — predictive model layer. Requires operator approval.
+
+## Phase 1 notes
+
+- Polling cadence scales from 6h (>2 days out) to 2min (final 15 minutes), with the closing line captured at T-90s (`is_closing_line`). Quota guards: <50 credits → reduced cadence, <25 → Telegram alert.
+- `matches.fifa_match_id` currently holds a deterministic 31-bit hash of The Odds API event ID (placeholder until FIFA IDs are backfilled). `matches.venue_id` is nullable for the same reason.
+- Unit tests: `npm run test`. DB-backed flow tests: `npm run test:integration`.
