@@ -1,0 +1,20 @@
+{
+  "tier_1_sharp": [
+    { "key": "pinnacle", "display": "Pinnacle", "operator_accessible": false, "region": "global" },
+    { "key": "sbobet", "display": "Sbobet", "operator_accessible": false, "region": "asian" },
+    { "key": "ibc", "display": "IBC / 188bet", "operator_accessible": false, "region": "asian" }
+  ],
+  "tier_2_sharp_adjacent": [
+    { "key": "bet365_eu", "display": "Bet365 (EU)", "operator_accessible": false, "region": "european" },
+    { "key": "caesars_vegas", "display": "Caesars (Vegas sharp)", "operator_accessible": false, "region": "us" },
+    { "key": "stake", "display": "Stake", "operator_accessible": false, "region": "global" }
+  ],
+  "tier_3_soft_retail": [
+    { "key": "draftkings", "display": "DraftKings", "operator_accessible": true, "region": "us" },
+    { "key": "fanduel", "display": "FanDuel", "operator_accessible": true, "region": "us" },
+    { "key": "betmgm", "display": "BetMGM", "operator_accessible": true, "region": "us" },
+    { "key": "bet365_ontario", "display": "Bet365 (Ontario)", "operator_accessible": true, "region": "canada" },
+    { "key": "caesars", "display": "Caesars (retail)", "operator_accessible": true, "region": "us" },
+    { "key": "bovada", "display": "Bovada", "operator_accessible": true, "region": "offshore" }
+  ]
+}
