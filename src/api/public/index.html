@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE PITCH — Slate</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand">THE PITCH</span>
+  <span class="meta">WORLD CUP 2026 · INTEL TERMINAL · v0.1 · PHASE 1 (MARKET VIEW ONLY)</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <span>A1 · TODAY'S SLATE · <span id="match-count">…</span> MATCHES</span>
+    <span>
+      <button class="btn secondary" id="deposit-btn">+ DEPOSIT</button>
+      <button class="btn" id="poll-btn">◆ RUN POLL</button>
+    </span>
+  </div>
+  <div class="panel-body">
+    <table id="slate"><thead>
+      <tr><th>MATCHUP</th><th>KICKOFF</th><th>STAGE</th><th>STATUS</th></tr>
+    </thead><tbody></tbody></table>
+    <div id="slate-empty" class="dim" style="display:none; padding:8px 0">
+      No fixtures yet. Set ODDS_API_KEY in .env and click RUN POLL (or restart) to ingest fixtures.
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>B1 · EDGE BOARD — MARKET VIEW (no model edges until Phase 2)</span></div>
+  <div class="panel-body">
+    <table id="edge-board"><thead>
+      <tr><th>MATCHUP</th><th>MKT</th><th>SIDE</th><th>BOOK</th><th>ODDS</th><th>PIN</th><th>MOVEMENT</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<!-- Deposit modal -->
+<div class="modal-overlay" id="deposit-modal">
+  <div class="modal">
+    <h3>ADD DEPOSIT</h3>
+    <label>Amount ($)</label>
+    <input type="number" id="dep-amount" min="0.01" step="0.01" placeholder="500.00">
+    <label>Note</label>
+    <input type="text" id="dep-note" value="World Cup bankroll allocation">
+    <div class="error" id="dep-error"></div>
+    <div class="actions">
+      <button class="btn secondary" id="dep-cancel">CANCEL</button>
+      <button class="btn" id="dep-confirm">CONFIRM</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { api, fmtOdds, fmtKickoffMT, fmtMovement, statusBadge, stageLabel, marketLabel, renderFooter } from '/app.js';
+
+async function refresh() {
+  try {
+    const data = await api('/api/slate');
+
+    document.getElementById('match-count').textContent = data.matches.length;
+    const tbody = document.querySelector('#slate tbody');
+    tbody.innerHTML = data.matches.map((m) => `
+      <tr class="click" onclick="location.href='/matches/${m.id}'">
+        <td>${m.away_code} @ ${m.home_code} <span class="dim">${m.away_name} at ${m.home_name}</span></td>
+        <td>${fmtKickoffMT(m.kickoff)}</td>
+        <td class="dim">${stageLabel(m.stage, m.group_letter)}</td>
+        <td>${statusBadge(m)}</td>
+      </tr>`).join('');
+    document.getElementById('slate-empty').style.display = data.matches.length ? 'none' : 'block';
+
+    const eb = document.querySelector('#edge-board tbody');
+    eb.innerHTML = data.edge_board.map((s) => {
+      const { mkt, side } = marketLabel(s.market);
+      return `<tr>
+        <td>${s.matchup}</td><td>${mkt}</td><td>${side}</td>
+        <td class="dim">${s.best_book}</td>
+        <td class="best">${fmtOdds(s.best_book_american)}</td>
+        <td class="dim">${fmtOdds(s.pinnacle_current_american)}</td>
+        <td>${fmtMovement(s.total_movement_cents)}</td>
+      </tr>`;
+    }).join('');
+
+    renderFooter(document.getElementById('footer'), data.status);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+document.getElementById('poll-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('poll-btn');
+  btn.textContent = '◆ POLLING…';
+  try { await api('/api/poll', { method: 'POST' }); } catch (e) { alert(e.message); }
+  btn.textContent = '◆ RUN POLL';
+  refresh();
+});
+
+// Deposit modal
+const modal = document.getElementById('deposit-modal');
+document.getElementById('deposit-btn').addEventListener('click', () => modal.classList.add('open'));
+document.getElementById('dep-cancel').addEventListener('click', () => modal.classList.remove('open'));
+document.getElementById('dep-confirm').addEventListener('click', async () => {
+  const amount = parseFloat(document.getElementById('dep-amount').value);
+  const note = document.getElementById('dep-note').value;
+  try {
+    await api('/bankroll/deposit', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ amount_dollars: amount, note })
+    });
+    modal.classList.remove('open');
+    refresh();
+  } catch (e) {
+    document.getElementById('dep-error').textContent = e.message;
+  }
+});
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+</body>
+</html>

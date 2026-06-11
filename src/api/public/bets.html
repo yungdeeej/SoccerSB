@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE PITCH — Bets</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand"><a href="/" style="color:inherit">← SLATE</a></span>
+  <span class="meta">BETS · ALL</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>LEDGER · BETS</span></div>
+  <div class="panel-body">
+    <table id="bets"><thead>
+      <tr><th>DATE</th><th>MATCH</th><th>MARKET</th><th>SIDE</th><th>BOOK</th><th>ODDS</th><th>STAKE</th><th>RESULT</th><th></th></tr>
+    </thead><tbody></tbody></table>
+    <div id="empty" class="dim" style="display:none; padding:8px 0">No bets recorded.</div>
+  </div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<!-- Settle modal -->
+<div class="modal-overlay" id="settle-modal">
+  <div class="modal">
+    <h3>SETTLE BET</h3>
+    <div id="settle-desc" class="dim" style="font-size:12px"></div>
+    <label>Outcome</label>
+    <select id="settle-outcome">
+      <option value="win">Win</option>
+      <option value="loss">Loss</option>
+      <option value="push">Push</option>
+      <option value="half_win">Half Win (AH)</option>
+      <option value="half_loss">Half Loss (AH)</option>
+      <option value="void">Void</option>
+    </select>
+    <div class="error" id="settle-error"></div>
+    <div class="actions">
+      <button class="btn secondary" id="settle-cancel">CANCEL</button>
+      <button class="btn" id="settle-confirm">CONFIRM</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { api, fmtOdds, fmtMoney, fmtKickoffMT, renderFooter } from '/app.js';
+
+let settleBetId = null;
+
+function resultCell(b) {
+  if (b.settlement_status === 'pending') return '<span class="dim">pending</span>';
+  if (b.pl_cents === null) return b.settlement_status;
+  const cls = b.pl_cents > 0 ? 'up' : b.pl_cents < 0 ? 'down' : 'flat';
+  const sign = b.pl_cents > 0 ? '+' : '';
+  return `<span class="${cls}">${(b.outcome ?? '').toUpperCase()} ${sign}${fmtMoney(b.pl_cents)}</span>`;
+}
+
+async function refresh() {
+  const data = await api('/api/bets');
+  const tbody = document.querySelector('#bets tbody');
+  tbody.innerHTML = data.bets.map((b) => `
+    <tr>
+      <td class="dim">${fmtKickoffMT(b.placed_at)}</td>
+      <td><a href="/matches/${b.match_id}">${b.away_code}-${b.home_code}</a></td>
+      <td>${b.market}</td><td>${b.side}</td><td class="dim">${b.book}</td>
+      <td>${fmtOdds(b.american_odds)}</td>
+      <td>${fmtMoney(b.stake_cents)}</td>
+      <td>${resultCell(b)}</td>
+      <td>${b.settlement_status === 'pending'
+        ? `<button class="btn secondary" data-settle="${b.id}" data-desc="${b.market} ${b.side} @ ${b.book} ${fmtOdds(b.american_odds)} (${fmtMoney(b.stake_cents)})">SETTLE</button>`
+        : ''}</td>
+    </tr>`).join('');
+  document.getElementById('empty').style.display = data.bets.length ? 'none' : 'block';
+
+  tbody.querySelectorAll('[data-settle]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      settleBetId = btn.dataset.settle;
+      document.getElementById('settle-desc').textContent = btn.dataset.desc;
+      document.getElementById('settle-error').textContent = '';
+      document.getElementById('settle-modal').classList.add('open');
+    });
+  });
+
+  renderFooter(document.getElementById('footer'), await api('/api/status'));
+}
+
+document.getElementById('settle-cancel').addEventListener('click', () =>
+  document.getElementById('settle-modal').classList.remove('open'));
+
+document.getElementById('settle-confirm').addEventListener('click', async () => {
+  try {
+    await api(`/bets/${settleBetId}/settle`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ outcome: document.getElementById('settle-outcome').value })
+    });
+    document.getElementById('settle-modal').classList.remove('open');
+    refresh();
+  } catch (e) {
+    document.getElementById('settle-error').textContent = e.message;
+  }
+});
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+</body>
+</html>

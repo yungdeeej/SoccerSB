@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE PITCH — Match</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand"><a href="/" style="color:inherit">← SLATE</a></span>
+  <span class="meta" id="title">…</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span id="match-head">MATCH</span><button class="btn" id="bet-btn">PLACE BET</button></div>
+  <div class="panel-body" id="match-meta"></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>MATCH OUTCOME (1X2)</span></div>
+  <div class="panel-body">
+    <table id="outcome"><thead>
+      <tr><th>SIDE</th><th>BEST</th><th>BOOK</th><th>PIN</th><th>PIN NO-VIG</th><th>MOVEMENT</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>TOTALS</span></div>
+  <div class="panel-body">
+    <table id="totals"><thead>
+      <tr><th>LINE</th><th>SIDE</th><th>BEST</th><th>BOOK</th><th>PIN</th><th>PIN NO-VIG</th><th>MOVEMENT</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>ASIAN HANDICAP</span></div>
+  <div class="panel-body">
+    <table id="ah"><thead>
+      <tr><th>LINE</th><th>SIDE</th><th>BEST</th><th>BOOK</th><th>PIN</th><th>MOVEMENT</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<!-- Bet modal -->
+<div class="modal-overlay" id="bet-modal">
+  <div class="modal">
+    <h3>PLACE BET</h3>
+    <label>Market</label>
+    <select id="bet-market"></select>
+    <label>Book</label>
+    <select id="bet-book">
+      <option>draftkings</option><option>fanduel</option><option>betmgm</option>
+      <option>bet365_ontario</option><option>caesars</option><option>bovada</option><option>pointsbet</option>
+    </select>
+    <label>Odds (American)</label>
+    <input type="number" id="bet-odds" placeholder="-110">
+    <label>Stake ($)</label>
+    <input type="number" id="bet-stake" min="0.01" step="0.01" placeholder="50.00">
+    <div class="error" id="bet-error"></div>
+    <div class="actions">
+      <button class="btn secondary" id="bet-cancel">CANCEL</button>
+      <button class="btn" id="bet-confirm">CONFIRM BET</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { api, fmtOdds, fmtKickoffMT, fmtMovement, statusBadge, stageLabel, marketLabel, renderFooter } from '/app.js';
+
+const matchId = location.pathname.split('/').pop();
+let marketStates = [];
+
+function pct(p) { return p === null ? '—' : `${(p * 100).toFixed(1)}%`; }
+
+async function refresh() {
+  const data = await api(`/api/matches/${matchId}`);
+  const m = data.match;
+  marketStates = data.market_states;
+
+  document.getElementById('title').textContent =
+    `${m.away_name.toUpperCase()} @ ${m.home_name.toUpperCase()} · ${stageLabel(m.stage, m.group_letter).toUpperCase()}`;
+  document.getElementById('match-head').textContent = `${m.away_code} @ ${m.home_code}`;
+  document.getElementById('match-meta').innerHTML =
+    `Kickoff: ${fmtKickoffMT(m.kickoff)}${m.venue_name ? ` (${m.venue_name}, ${m.venue_city})` : ''} · Status: ${statusBadge(m)}` +
+    (m.home_score !== null ? ` · <b>${m.home_score}-${m.away_score}</b>` : '');
+
+  const rows = (filter) => marketStates.filter(filter)
+    .map((s) => ({ s, lbl: marketLabel(s.market) }));
+
+  document.querySelector('#outcome tbody').innerHTML =
+    rows((s) => s.market.startsWith('match_outcome_'))
+      .sort((a, b) => a.lbl.side.localeCompare(b.lbl.side))
+      .map(({ s, lbl }) => `<tr>
+        <td>${lbl.side === 'home' ? m.home_code : lbl.side === 'away' ? m.away_code : 'Draw'}</td>
+        <td class="best">${fmtOdds(s.best_book_american)}</td><td class="dim">${s.best_book}</td>
+        <td>${fmtOdds(s.pinnacle_current_american)}</td><td class="dim">${pct(s.pinnacle_no_vig_prob)}</td>
+        <td>${fmtMovement(s.total_movement_cents)}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="dim">no snapshots yet</td></tr>';
+
+  document.querySelector('#totals tbody').innerHTML =
+    rows((s) => s.market.startsWith('total_'))
+      .sort((a, b) => a.s.market.localeCompare(b.s.market))
+      .map(({ s }) => {
+        const mm = s.market.match(/^total_(over|under)_(.+)$/);
+        return `<tr>
+          <td>${mm[2]}</td><td>${mm[1]}</td>
+          <td class="best">${fmtOdds(s.best_book_american)}</td><td class="dim">${s.best_book}</td>
+          <td>${fmtOdds(s.pinnacle_current_american)}</td><td class="dim">${pct(s.pinnacle_no_vig_prob)}</td>
+          <td>${fmtMovement(s.total_movement_cents)}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="7" class="dim">no snapshots yet</td></tr>';
+
+  document.querySelector('#ah tbody').innerHTML =
+    rows((s) => s.market.startsWith('asian_handicap_'))
+      .sort((a, b) => a.s.market.localeCompare(b.s.market))
+      .map(({ s }) => {
+        const mm = s.market.match(/^asian_handicap_(home|away)_(.+)$/);
+        return `<tr>
+          <td>${mm[2]}</td><td>${mm[1] === 'home' ? m.home_code : m.away_code}</td>
+          <td class="best">${fmtOdds(s.best_book_american)}</td><td class="dim">${s.best_book}</td>
+          <td>${fmtOdds(s.pinnacle_current_american)}</td>
+          <td>${fmtMovement(s.total_movement_cents)}</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" class="dim">no snapshots yet</td></tr>';
+
+  renderFooter(document.getElementById('footer'), await api('/api/status'));
+
+  // Populate bet modal markets
+  const sel = document.getElementById('bet-market');
+  sel.innerHTML = marketStates.map((s) => `<option value="${s.market}">${s.market}</option>`).join('')
+    || '<option value="match_outcome_home">match_outcome_home</option><option value="match_outcome_draw">match_outcome_draw</option><option value="match_outcome_away">match_outcome_away</option>';
+}
+
+const modal = document.getElementById('bet-modal');
+document.getElementById('bet-btn').addEventListener('click', () => {
+  document.getElementById('bet-error').textContent = '';
+  modal.classList.add('open');
+});
+document.getElementById('bet-cancel').addEventListener('click', () => modal.classList.remove('open'));
+
+document.getElementById('bet-market').addEventListener('change', (e) => {
+  const s = marketStates.find((x) => x.market === e.target.value);
+  if (s) {
+    document.getElementById('bet-odds').value = s.best_book_american;
+    document.getElementById('bet-book').value = s.best_book;
+  }
+});
+
+document.getElementById('bet-confirm').addEventListener('click', async () => {
+  const market = document.getElementById('bet-market').value;
+  const side = market.includes('_home') ? 'home' : market.includes('_away') ? 'away'
+    : market.includes('_draw') ? 'draw' : market.includes('over') ? 'over' : 'under';
+  try {
+    await api('/bets/place', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        match_id: matchId,
+        market,
+        side,
+        book: document.getElementById('bet-book').value,
+        american_odds: parseInt(document.getElementById('bet-odds').value, 10),
+        stake_dollars: parseFloat(document.getElementById('bet-stake').value)
+      })
+    });
+    modal.classList.remove('open');
+    location.href = '/bets';
+  } catch (e) {
+    document.getElementById('bet-error').textContent = e.message;
+  }
+});
+
+refresh();
+setInterval(refresh, 60_000);
+</script>
+</body>
+</html>
