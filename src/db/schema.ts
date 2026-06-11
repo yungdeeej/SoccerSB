@@ -141,7 +141,8 @@ export const matches = pgTable('matches', {
 
   home_team_id: uuid('home_team_id').references(() => teams.id).notNull(),
   away_team_id: uuid('away_team_id').references(() => teams.id).notNull(),
-  venue_id: uuid('venue_id').references(() => venues.id).notNull(),
+  // Nullable: The Odds API doesn't provide venues — backfilled from FIFA data later
+  venue_id: uuid('venue_id').references(() => venues.id),
   referee_id: uuid('referee_id').references(() => referees.id),
 
   tournament_stage: text('tournament_stage').notNull(),
