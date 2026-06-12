@@ -71,7 +71,9 @@ tests/                   Vitest unit tests
 - **Phase 0 (Foundation) — complete.** Schema deployed, lean seed verified, money-path utils tested, health endpoint green.
 - **Phase 1 (Market Intelligence Skeleton) — complete.** Fixtures ingestion + adaptive odds polling from The Odds API (zod-validated, quota-aware), market state computation (consensus / Pinnacle no-vig anchor / best accessible price / movement), terminal dashboard (`/` slate + edge board, `/matches/:id` detail, `/bets` ledger), atomic bet placement / deposit / settlement workflows, Telegram `/status` skeleton, full `agent_runs` logging.
   - **To go live:** set `ODDS_API_KEY` (fixtures + polling start automatically on boot) and `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `.env`, then restart. Without keys the server runs with manual workflows only.
-- **Next: Phase 2 (Quant + Tactician)** — predictive model layer. Requires operator approval.
+- **Phase 2a (The Quant) — complete.** Python FastAPI service (`src/agents/quant/`, port 8001): Bivariate Poisson with Dixon-Coles correction + draw inflation, Elo/market-value/xG composite ratings, venue factor (host/altitude/travel), all 8 v1 markets, seeded bootstrap CIs. Data loaders: eloratings.net (daily), Transfermarkt (weekly), API-Football (needs `APIFOOTBALL_KEY`). **Backtest gate PASSED: 0.191 avg Brier across 11 major tournaments 2014-2024** (operator-approved gate definition; 2022 Qatar alone: 0.2084 — that tournament beat the bookmakers too). Dashboard shows "THE QUANT'S READ" on match pages only while a passing `model_versions` row exists.
+  - Run both services: `npm run dev` + `cd src/agents/quant && uv run uvicorn main:app --port 8001` (or via `Procfile`).
+- **Next: Phase 2b (The Tactician)** — situational adjustments. Requires operator approval.
 
 ## Phase 1 notes
 

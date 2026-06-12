@@ -3,3 +3,11 @@ node_modules/
 dist/
 *.log
 .DS_Store
+# Python (Quant service)
+src/agents/quant/.venv/
+src/agents/quant/**/__pycache__/
+src/agents/quant/.mypy_cache/
+src/agents/quant/.ruff_cache/
+src/agents/quant/.pytest_cache/
+src/agents/quant/data/.cache/
+src/agents/quant/calibration/data/
