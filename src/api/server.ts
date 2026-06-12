@@ -24,6 +24,7 @@ app.get('/', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'index.html')));
 app.get('/matches/:id', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'match.html')));
 app.get('/bets', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'bets.html')));
 app.get('/verdicts/:id', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'verdict.html')));
+app.get('/treasurer', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'treasurer.html')));
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -41,11 +42,37 @@ app.listen(port, () => {
     console.warn('ODDS_API_KEY not set — fixtures + odds polling disabled until configured');
   }
 
-  startTelegramCommandLoop(async () => formatStatusForTelegram(await getSystemStatus()));
+  startTelegramCommandLoop({
+    '/status': async () => formatStatusForTelegram(await getSystemStatus()),
+    '/treasurer': async (args) => {
+      const { handleTreasurerCommand } = await import('../agents/treasurer/index');
+      return handleTreasurerCommand(args);
+    }
+  });
 
   scheduleQuantJobs();
   scheduleTacticianJobs();
+  scheduleTreasurerJobs();
 });
+
+/** Treasurer crons: 8am MT daily report, then compound/withdraw trigger check. */
+function scheduleTreasurerJobs(): void {
+  let lastReportDay: string | null = null;
+  setInterval(async () => {
+    const tz = process.env.OPERATOR_TIMEZONE ?? 'America/Edmonton';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, hour: '2-digit', hour12: false, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date());
+    const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? '';
+    const day = `${get('year')}-${get('month')}-${get('day')}`;
+    if (get('hour') === '08' && lastReportDay !== day) {
+      lastReportDay = day;
+      const { sendDailyReport, checkCompoundWithdrawTrigger } = await import('../agents/treasurer/index');
+      await sendDailyReport().catch((err) => console.error('daily report failed:', err));
+      await checkCompoundWithdrawTrigger().catch((err) => console.error('compound check failed:', err));
+    }
+  }, 60 * 1000);
+}
 
 /**
  * Tactician checkpoints (Phase 2b): T-24h, T-12h, T-2h, T-30min per match.

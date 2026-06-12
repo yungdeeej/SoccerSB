@@ -326,10 +326,47 @@ document.getElementById('bet-market').addEventListener('change', (e) => {
   }
 });
 
+// Treasurer recommendation (Phase 4): surface STRIKE verdict stake for the
+// selected market, warn on >1.5x override (Walters: discipline over action)
+let verdictsByMarket = new Map();
+async function loadVerdictRecs() {
+  try {
+    const data = await api(`/api/matches/${matchId}/verdicts`);
+    verdictsByMarket = new Map((data.verdicts ?? []).filter((v) => v.decision === 'STRIKE').map((v) => [v.market, v]));
+  } catch { /* no verdicts yet */ }
+}
+loadVerdictRecs();
+
+function showRecommendation() {
+  const market = document.getElementById('bet-market').value;
+  const v = verdictsByMarket.get(market);
+  const el = document.getElementById('bet-error');
+  if (v && v.recommended_stake_cents) {
+    el.className = 'dim';
+    el.textContent = `Treasurer recommends: $${(v.recommended_stake_cents / 100).toFixed(0)} (Kelly ${v.kelly_fraction_used}, ${Number(v.bankroll_pct).toFixed(1)}% of bankroll) @ ${v.recommended_book}`;
+    document.getElementById('bet-stake').value = (v.recommended_stake_cents / 100).toFixed(2);
+  } else {
+    el.className = 'error';
+    el.textContent = '';
+  }
+}
+document.getElementById('bet-market').addEventListener('change', showRecommendation);
+document.getElementById('bet-btn').addEventListener('click', showRecommendation);
+
 document.getElementById('bet-confirm').addEventListener('click', async () => {
   const market = document.getElementById('bet-market').value;
   const side = market.includes('_home') ? 'home' : market.includes('_away') ? 'away'
     : market.includes('_draw') ? 'draw' : market.includes('over') ? 'over' : 'under';
+
+  // Override warning at >1.5x recommendation
+  const rec = verdictsByMarket.get(market);
+  const stakeDollars = parseFloat(document.getElementById('bet-stake').value);
+  if (rec?.recommended_stake_cents && stakeDollars > (rec.recommended_stake_cents / 100) * 1.5) {
+    const pctOver = ((stakeDollars / (rec.recommended_stake_cents / 100)) * 100 - 100).toFixed(0);
+    if (!confirm(`Stake is ${pctOver}% above Treasurer recommendation ($${(rec.recommended_stake_cents / 100).toFixed(0)}). Walters principle: discipline over action. Proceed?`)) {
+      return;
+    }
+  }
   try {
     await api('/bets/place', {
       method: 'POST', headers: { 'content-type': 'application/json' },

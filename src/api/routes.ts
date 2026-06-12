@@ -262,6 +262,23 @@ const PlaceBetBody = z.object({
 apiRouter.post('/bets/place', async (req: Request, res: Response) => {
   try {
     const body = PlaceBetBody.parse(req.body);
+
+    // Treasurer discipline check (Phase 4): halt / daily cap / cooldown / match cap
+    const { validateBetPlacement } = await import('../agents/treasurer/index');
+    const [matchRow] = await db
+      .select({ stage: matches.tournament_stage })
+      .from(matches)
+      .where(eq(matches.id, body.match_id))
+      .limit(1);
+    const knockout = matchRow
+      ? ['r32', 'r16', 'qf', 'sf', 'third', 'final'].includes(matchRow.stage)
+      : false;
+    const validation = await validateBetPlacement(body.match_id, knockout);
+    if (!validation.allowed) {
+      res.status(400).json({ error: validation.reason, code: 'treasurer_blocked' });
+      return;
+    }
+
     const stake_cents = BigInt(Math.round(body.stake_dollars * 100));
     const result = await placeBet({
       match_id: body.match_id,
@@ -288,6 +305,12 @@ apiRouter.post('/bets/:id/settle', async (req: Request, res: Response) => {
   try {
     const body = SettleBody.parse(req.body);
     const result = await settleBet(req.params.id, body.outcome);
+
+    // Automatic CLV (Phase 4): immediate, then 5min/30min retries if the
+    // closing line isn't captured yet. Never blocks settlement.
+    const { scheduleCLVComputation } = await import('../agents/treasurer/index');
+    scheduleCLVComputation(req.params.id);
+
     res.json({
       payout_cents: Number(result.payout_cents),
       pl_cents: Number(result.pl_cents),
@@ -366,6 +389,71 @@ apiRouter.post('/api/matches/:id/tactician/run', async (req: Request, res: Respo
     const { runTactician } = await import('../agents/tactician/index');
     const output = await runTactician(req.params.id, 'manual');
     res.json(output);
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Treasurer (Phase 4)
+// ---------------------------------------------------------------------------
+
+apiRouter.get('/api/treasurer', async (_req: Request, res: Response) => {
+  try {
+    const { getTreasurerSnapshot, getCurrentBaseline, compoundGainPct } = await import('../agents/treasurer/index');
+    const { bankroll_ledger } = await import('../db/schema');
+    const { isNotNull } = await import('drizzle-orm');
+
+    const snapshot = await getTreasurerSnapshot(false);
+    const baseline = await getCurrentBaseline();
+
+    const ledgerRows = await db
+      .select()
+      .from(bankroll_ledger)
+      .orderBy(desc(bankroll_ledger.occurred_at))
+      .limit(50);
+
+    // CLV by ISO week from settled bets
+    const settled = await db
+      .select({ settled_at: bets.settled_at, clv_cents: bets.clv_cents, pl_cents: bets.pl_cents, outcome: bets.outcome })
+      .from(bets)
+      .where(and(eq(bets.settlement_status, 'settled'), isNotNull(bets.settled_at)));
+    const byWeek = new Map<string, { clv: number[]; pl: bigint; n: number }>();
+    for (const b of settled) {
+      const d = b.settled_at as Date;
+      const week = `${d.getUTCFullYear()}-W${String(Math.ceil(((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86400000 + 1) / 7)).padStart(2, '0')}`;
+      const entry = byWeek.get(week) ?? { clv: [], pl: 0n, n: 0 };
+      if (b.clv_cents !== null) entry.clv.push(Number(b.clv_cents));
+      entry.pl += b.pl_cents ?? 0n;
+      entry.n++;
+      byWeek.set(week, entry);
+    }
+
+    res.json({
+      snapshot: {
+        ...snapshot,
+        active_bankroll_cents: Number(snapshot.active_bankroll_cents),
+        available_capital_cents: Number(snapshot.available_capital_cents),
+        total_capital_cents: Number(snapshot.total_capital_cents),
+        pending_wagers_cents: Number(snapshot.pending_wagers_cents),
+        peak_bankroll_cents: Number(snapshot.peak_bankroll_cents),
+        todays_bets_by_match: Object.fromEntries(snapshot.todays_bets_by_match)
+      },
+      baseline_cents: baseline === null ? null : Number(baseline),
+      baseline_gain_pct: baseline !== null ? compoundGainPct(snapshot.active_bankroll_cents, baseline) : null,
+      ledger: ledgerRows.map((r) => ({
+        ...r,
+        amount_cents: Number(r.amount_cents),
+        balance_after_cents: Number(r.balance_after_cents),
+        peak_bankroll_at_entry_cents: r.peak_bankroll_at_entry_cents === null ? null : Number(r.peak_bankroll_at_entry_cents)
+      })),
+      clv_by_week: [...byWeek.entries()].sort().map(([week, e]) => ({
+        week,
+        bets: e.n,
+        pl_cents: Number(e.pl),
+        avg_clv_cents: e.clv.length > 0 ? e.clv.reduce((s, v) => s + v, 0) / e.clv.length : null
+      }))
+    });
   } catch (err) {
     errorOut(res, err);
   }

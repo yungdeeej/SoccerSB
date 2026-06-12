@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE PITCH — Treasurer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand"><a href="/" style="color:inherit">← SLATE</a></span>
+  <span class="meta">THE TREASURER · BANKROLL · DISCIPLINE · CLV</span>
+</div>
+
+<div class="panel" id="state-panel">
+  <div class="panel-head"><span id="state-head">C1 · BANKROLL</span></div>
+  <div class="panel-body" id="state-body"><span class="dim">loading…</span></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>CLV BY WEEK</span></div>
+  <div class="panel-body">
+    <table id="clv-table"><thead><tr><th>WEEK</th><th>BETS</th><th>P&L</th><th>AVG CLV</th></tr></thead><tbody></tbody></table>
+    <div id="clv-empty" class="dim" style="display:none">No settled bets yet.</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>LEDGER (LAST 50, APPEND-ONLY)</span></div>
+  <div class="panel-body">
+    <table id="ledger-table"><thead>
+      <tr><th>WHEN (MT)</th><th>TYPE</th><th>AMOUNT</th><th>BALANCE</th><th>STATE</th><th>NOTES</th></tr>
+    </thead><tbody></tbody></table>
+  </div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<script type="module">
+import { api, fmtMoney, renderFooter } from '/app.js';
+
+async function load() {
+  const data = await api('/api/treasurer');
+  const s = data.snapshot;
+
+  const head = document.getElementById('state-head');
+  const panel = document.getElementById('state-panel');
+  if (s.stop_loss_active === 'halt') {
+    head.innerHTML = 'C1 · BANKROLL — <span class="down">🛑 HALT</span>';
+    panel.style.borderColor = '#ff5c5c';
+  } else if (s.stop_loss_active === 'reduced_kelly') {
+    head.innerHTML = 'C1 · BANKROLL — <span class="up">⚠️ REDUCED KELLY</span>';
+    panel.style.borderColor = '#e8a33d';
+  }
+
+  document.getElementById('state-body').innerHTML = `
+    ACTIVE: <b>${fmtMoney(s.active_bankroll_cents)}</b> · PENDING: ${fmtMoney(s.pending_wagers_cents)} · TOTAL: ${fmtMoney(s.total_capital_cents)}<br>
+    PEAK: ${fmtMoney(s.peak_bankroll_cents)} (drawdown ${s.drawdown_pct_from_peak.toFixed(1)}%)${s.stop_loss_reason ? ` — <span class="down">${s.stop_loss_reason}</span>` : ''}<br>
+    KELLY: ${s.current_kelly_fraction} · TODAY'S BETS: ${s.todays_bet_count}/${s.daily_bet_cap_effective}<br>
+    CLV 7D: ${s.this_week_clv_cents >= 0 ? '+' : ''}${s.this_week_clv_cents.toFixed(1)}¢ ·
+    CLV 30D: ${s.rolling_30d_clv_cents >= 0 ? '+' : ''}${s.rolling_30d_clv_cents.toFixed(1)}¢ (<b>${s.clv_classification}</b>)<br>
+    ${data.baseline_cents !== null ? `BASELINE: ${fmtMoney(data.baseline_cents)} (${data.baseline_gain_pct >= 0 ? '+' : ''}${data.baseline_gain_pct.toFixed(1)}%)` : '<span class="dim">No baseline set (no deposits yet)</span>'}`;
+
+  const clvBody = document.querySelector('#clv-table tbody');
+  clvBody.innerHTML = data.clv_by_week.map((w) => `
+    <tr><td>${w.week}</td><td>${w.bets}</td>
+      <td class="${w.pl_cents > 0 ? 'up' : w.pl_cents < 0 ? 'down' : 'flat'}">${fmtMoney(w.pl_cents)}</td>
+      <td>${w.avg_clv_cents !== null ? (w.avg_clv_cents >= 0 ? '+' : '') + w.avg_clv_cents.toFixed(1) + '¢' : '—'}</td></tr>`).join('');
+  document.getElementById('clv-empty').style.display = data.clv_by_week.length ? 'none' : 'block';
+
+  document.querySelector('#ledger-table tbody').innerHTML = data.ledger.map((r) => `
+    <tr>
+      <td class="dim">${new Date(r.occurred_at).toLocaleString('en-US', { timeZone: 'America/Edmonton' })}</td>
+      <td>${r.entry_type}</td>
+      <td class="${r.amount_cents > 0 ? 'up' : r.amount_cents < 0 ? 'down' : 'flat'}">${fmtMoney(r.amount_cents)}</td>
+      <td>${fmtMoney(r.balance_after_cents)}</td>
+      <td class="dim">${r.stop_loss_state_at_entry ?? ''}</td>
+      <td class="dim" style="white-space:normal">${r.notes ?? ''}</td>
+    </tr>`).join('');
+
+  renderFooter(document.getElementById('footer'), await api('/api/status'));
+}
+
+load();
+setInterval(load, 60_000);
+</script>
+</body>
+</html>

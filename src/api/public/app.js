@@ -66,7 +66,7 @@ export function renderFooter(el, status) {
     <span>API CREDITS <b>${status.api_credits_remaining ?? '—'}${status.reduced_polling ? ' (REDUCED)' : ''}</b></span>
     <span>ODDS SYNC <b>${status.last_odds_sync ? timeAgo(status.last_odds_sync) : 'never'}</b></span>
     <span>FIXTURES <b>${status.last_fixtures_sync ? timeAgo(status.last_fixtures_sync) : 'never'}</b></span>
-    <span><a href="/bets">BETS</a> · <a href="/health">HEALTH</a></span>`;
+    <span><a href="/bets">BETS</a> · <a href="/treasurer">TREASURER</a> · <a href="/health">HEALTH</a></span>`;
 }
 
 export function timeAgo(iso) {
