@@ -78,7 +78,9 @@ export async function fetchWorldCupOdds(opts?: {
   const params = new URLSearchParams({
     apiKey,
     regions: opts?.regions ?? 'us,us2,uk,eu',
-    markets: opts?.markets ?? 'h2h_3_way,totals,spreads',
+    // Soccer note: on the /odds endpoint, `h2h` IS the three-way market
+    // (home/draw/away) — `h2h_3_way` is rejected with INVALID_MARKET.
+    markets: opts?.markets ?? 'h2h,totals,spreads',
     oddsFormat: 'american'
   });
 
