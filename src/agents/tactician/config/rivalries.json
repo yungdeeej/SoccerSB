@@ -1,0 +1,17 @@
+{
+  "regional_rivalries": [
+    ["ARG", "BRA"],
+    ["MEX", "USA"],
+    ["ENG", "SCO"],
+    ["NED", "GER"],
+    ["FRA", "GER"],
+    ["ESP", "POR"],
+    ["KSA", "QAT"],
+    ["KOR", "JPN"],
+    ["EGY", "ALG"],
+    ["SEN", "CIV"],
+    ["URU", "ARG"],
+    ["COL", "ECU"]
+  ],
+  "playoff_rematches": []
+}
