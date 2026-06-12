@@ -1,0 +1,17 @@
+modules = ["nodejs-22", "python-3.12"]
+
+run = "bash scripts/start_all.sh"
+
+[deployment]
+# IMPORTANT: Reserved VM (gce), NOT Autoscale. Autoscale sleeps between
+# requests, which kills the odds pollers and T-24h/T-12h/T-2h/T-30min
+# checkpoint schedulers. This system must run continuously.
+deploymentTarget = "gce"
+run = ["bash", "scripts/start_all.sh"]
+
+[[ports]]
+localPort = 3000
+externalPort = 80
+
+[env]
+PORT = "3000"

@@ -20,6 +20,15 @@ Phase 0 therefore seeds **only** facts that cannot drift:
 
 Everything else — team ratings, Elo, market values, xG, style profiles, rosters, fixtures, referee assignments, venue capacities, FIFA numeric IDs — is **NULL at the end of Phase 0, intentionally**. Agents fetch those from authoritative sources at runtime in Phases 1–3. When in doubt: don't seed it.
 
+## Deploying on Replit
+
+1. Import this repo into Replit (the included `.replit` configures Node 22 + Python 3.12 and runs `scripts/start_all.sh`, which boots migrations → seed → Quant service (internal :8001) → web terminal on the exposed port).
+2. Create a [Neon](https://neon.tech) Postgres database and copy its connection string **with `?sslmode=require`**.
+3. In Replit **Secrets**, set: `DATABASE_URL`, `ODDS_API_KEY`, `ANTHROPIC_API_KEY` (optionally `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, `OPERATOR_TIMEZONE=America/Edmonton`). Never commit `.env`.
+4. **Publish as a Reserved VM deployment — NOT Autoscale.** Autoscale sleeps between requests, which kills the odds pollers and the T-24h/T-12h/T-2h/T-30min checkpoint schedulers.
+5. First boot on a fresh database self-heals: migrations + lean seed run automatically, Elo/market values load immediately (instead of waiting for the 3am cron), and the backtest gate runs once (~2 min) so model predictions can display.
+6. Verify `https://<your-app>/health` shows all checks ok, then deposit your bankroll via the dashboard.
+
 ## Setup
 
 ```bash

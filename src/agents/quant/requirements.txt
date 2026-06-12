@@ -1,0 +1,89 @@
+annotated-doc==0.0.4
+    # via fastapi
+annotated-types==0.7.0
+    # via pydantic
+anyio==4.13.0
+    # via
+    #   httpx
+    #   starlette
+beautifulsoup4==4.15.0
+    # via the-pitch-quant
+certifi==2026.5.20
+    # via
+    #   httpcore
+    #   httpx
+click==8.4.1
+    # via uvicorn
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via click
+fastapi==0.136.3
+    # via the-pitch-quant
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via the-pitch-quant
+idna==3.18
+    # via
+    #   anyio
+    #   httpx
+lxml==6.1.1
+    # via the-pitch-quant
+numpy==2.4.6
+    # via
+    #   pandas
+    #   scipy
+    #   the-pitch-quant
+pandas==3.0.3
+    # via the-pitch-quant
+psycopg==3.3.4
+    # via the-pitch-quant
+psycopg-binary==3.3.4 ; implementation_name != 'pypy'
+    # via psycopg
+pydantic==2.13.4
+    # via
+    #   fastapi
+    #   pydantic-settings
+    #   the-pitch-quant
+pydantic-core==2.46.4
+    # via pydantic
+pydantic-settings==2.14.1
+    # via the-pitch-quant
+python-dateutil==2.9.0.post0
+    # via pandas
+python-dotenv==1.2.2
+    # via pydantic-settings
+pyyaml==6.0.3
+    # via the-pitch-quant
+scipy==1.17.1
+    # via the-pitch-quant
+six==1.17.0
+    # via python-dateutil
+soupsieve==2.8.4
+    # via beautifulsoup4
+starlette==1.3.0
+    # via fastapi
+typing-extensions==4.15.0
+    # via
+    #   anyio
+    #   beautifulsoup4
+    #   fastapi
+    #   psycopg
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+tzdata==2026.2 ; sys_platform == 'emscripten' or sys_platform == 'win32'
+    # via
+    #   pandas
+    #   psycopg
+uvicorn==0.49.0
+    # via the-pitch-quant

@@ -28,8 +28,9 @@ app.get('/treasurer', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'treasurer.ht
 
 const port = Number(process.env.PORT ?? 3000);
 
-app.listen(port, () => {
-  console.log(`The Pitch — terminal on :${port} (${process.env.SYSTEM_ENV ?? 'development'})`);
+// 0.0.0.0: required for Replit/containers to route external traffic
+app.listen(port, '0.0.0.0', () => {
+  console.log(`The Pitch — terminal on 0.0.0.0:${port} (${process.env.SYSTEM_ENV ?? 'development'})`);
 
   // Live data layers — degrade gracefully without ODDS_API_KEY
   if (process.env.ODDS_API_KEY) {
@@ -53,7 +54,42 @@ app.listen(port, () => {
   scheduleQuantJobs();
   scheduleTacticianJobs();
   scheduleTreasurerJobs();
+  void bootstrapFreshDatabase();
 });
+
+/**
+ * Fresh-deploy bootstrap (e.g. first boot against a new Neon database):
+ * if teams lack Elo ratings, pull them now instead of waiting for the 3am
+ * cron; if no passing backtest-gate row exists, run the gate once so model
+ * predictions can display. Retries while the Quant service finishes booting.
+ */
+async function bootstrapFreshDatabase(): Promise<void> {
+  const { quantClient } = await import('../agents/orchestrator/quant_client');
+
+  let health = null;
+  for (let attempt = 0; attempt < 12 && !health; attempt++) {
+    health = await quantClient.checkHealth();
+    if (!health) await new Promise((r) => setTimeout(r, 5000));
+  }
+  if (!health) {
+    console.warn('bootstrap: quant service unreachable after 60s — ratings/backtest deferred to crons');
+    return;
+  }
+
+  if ((health.teams_with_elo ?? 0) < 48) {
+    console.log('bootstrap: fresh database detected — loading Elo + market values now…');
+    await quantClient.updateRatings(true)
+      .then(() => console.log('bootstrap: ratings loaded'))
+      .catch((err) => console.error('bootstrap: ratings load failed:', err));
+  }
+
+  if (!health.backtest_passed) {
+    console.log('bootstrap: no passing backtest gate on this database — running validation (one-time, ~2min)…');
+    quantClient.runBacktest('all_majors')
+      .then((r) => console.log('bootstrap: backtest recorded:', JSON.stringify(r).slice(0, 120)))
+      .catch((err) => console.error('bootstrap: backtest failed:', err));
+  }
+}
 
 /** Treasurer crons: 8am MT daily report, then compound/withdraw trigger check. */
 function scheduleTreasurerJobs(): void {
