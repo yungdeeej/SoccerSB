@@ -18,6 +18,11 @@
 </div>
 
 <div class="panel">
+  <div class="panel-head"><span>THE QUANT'S READ</span></div>
+  <div class="panel-body" id="quant-panel"><span class="dim">loading…</span></div>
+</div>
+
+<div class="panel">
   <div class="panel-head"><span>MATCH OUTCOME (1X2)</span></div>
   <div class="panel-body">
     <table id="outcome"><thead>
@@ -128,12 +133,38 @@ async function refresh() {
         </tr>`;
       }).join('') || '<tr><td colspan="6" class="dim">no snapshots yet</td></tr>';
 
+  renderQuant(data.quant, m);
   renderFooter(document.getElementById('footer'), await api('/api/status'));
 
   // Populate bet modal markets
   const sel = document.getElementById('bet-market');
   sel.innerHTML = marketStates.map((s) => `<option value="${s.market}">${s.market}</option>`).join('')
     || '<option value="match_outcome_home">match_outcome_home</option><option value="match_outcome_draw">match_outcome_draw</option><option value="match_outcome_away">match_outcome_away</option>';
+}
+
+function renderQuant(quant, m) {
+  const el = document.getElementById('quant-panel');
+  if (!quant || !quant.gate.passed) {
+    el.innerHTML = '<span class="dim">Model not yet validated — predictions hidden</span>';
+    return;
+  }
+  const p = quant.latest_prediction;
+  if (!p) {
+    el.innerHTML = `<span class="dim">No prediction yet for this match (model ${quant.gate.version} validated · backtest Brier ${quant.gate.brier})</span>`;
+    return;
+  }
+  const mo = p.predictions.match_outcome;
+  const ci = p.confidence_interval ?? {};
+  const ciWidth = Math.max(ci.home_win_ci_width ?? 0, ci.draw_ci_width ?? 0, ci.away_win_ci_width ?? 0);
+  const warn = (p.warnings ?? []).join('; ');
+  el.innerHTML = `
+    Model fair: <b>${m.home_code} ${(mo.home_win_prob*100).toFixed(0)}%</b> /
+    Draw ${(mo.draw_prob*100).toFixed(0)}% /
+    <b>${m.away_code} ${(mo.away_win_prob*100).toFixed(0)}%</b><br>
+    Expected goals: ${m.home_code} ${Number(p.expected_goals_home).toFixed(2)} / ${m.away_code} ${Number(p.expected_goals_away).toFixed(2)}<br>
+    CI width: ±${(ciWidth*100).toFixed(0)}%${ci.low_confidence_flag ? ' <span class="down">(LOW CONFIDENCE)</span>' : ''}<br>
+    Inputs quality: ${p.inputs_quality_score}/100${warn ? ` <span class="dim">(${warn})</span>` : ''}<br>
+    <span class="dim">Model ${p.model_version} · backtest Brier ${quant.gate.brier} · ${new Date(p.predicted_at).toLocaleString('en-US', {timeZone: 'America/Edmonton'})} MT</span>`;
 }
 
 const modal = document.getElementById('bet-modal');

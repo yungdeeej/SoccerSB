@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { asc, desc, eq, gte } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
-import { matches, teams, venues, bets } from '../db/schema';
+import { matches, teams, venues, bets, model_predictions, model_versions } from '../db/schema';
 import { getMarketStates, type MarketState } from '../agents/wolfman/market_state';
 import { pollTick } from '../agents/wolfman/poll';
 import { syncFixtures } from '../agents/wolfman/fixtures';
@@ -105,6 +105,22 @@ apiRouter.get('/api/slate', async (_req: Request, res: Response) => {
   }
 });
 
+/** Backtest gate: latest passing quant model version, or null. */
+async function quantGateStatus(): Promise<{ passed: boolean; brier: number | null; version: string | null }> {
+  const [row] = await db
+    .select({
+      version: model_versions.version,
+      brier: model_versions.backtest_brier
+    })
+    .from(model_versions)
+    .where(eq(model_versions.backtest_passed, true))
+    .orderBy(desc(model_versions.deployed_at))
+    .limit(1);
+  return row
+    ? { passed: true, brier: row.brier === null ? null : Number(row.brier), version: row.version }
+    : { passed: false, brier: null, version: null };
+}
+
 apiRouter.get('/api/matches/:id', async (req: Request, res: Response) => {
   try {
     const row = await loadMatchRow(req.params.id);
@@ -113,7 +129,30 @@ apiRouter.get('/api/matches/:id', async (req: Request, res: Response) => {
       return;
     }
     const states = await getMarketStates(req.params.id);
-    res.json({ match: row, market_states: states });
+
+    // Quant panel data — predictions shown ONLY when the backtest gate passed
+    const gate = await quantGateStatus();
+    let latestPrediction: Record<string, unknown> | null = null;
+    if (gate.passed) {
+      const [pred] = await db
+        .select({
+          predicted_at: model_predictions.predicted_at,
+          model_version: model_predictions.model_version,
+          expected_goals_home: model_predictions.expected_goals_home,
+          expected_goals_away: model_predictions.expected_goals_away,
+          predictions: model_predictions.predictions,
+          confidence_interval: model_predictions.confidence_interval,
+          inputs_quality_score: model_predictions.inputs_quality_score,
+          warnings: model_predictions.warnings
+        })
+        .from(model_predictions)
+        .where(eq(model_predictions.match_id, req.params.id))
+        .orderBy(desc(model_predictions.predicted_at))
+        .limit(1);
+      latestPrediction = pred ?? null;
+    }
+
+    res.json({ match: row, market_states: states, quant: { gate, latest_prediction: latestPrediction } });
   } catch (err) {
     errorOut(res, err);
   }

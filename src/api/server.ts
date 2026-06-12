@@ -41,7 +41,78 @@ app.listen(port, () => {
   }
 
   startTelegramCommandLoop(async () => formatStatusForTelegram(await getSystemStatus()));
+
+  scheduleQuantJobs();
 });
+
+/**
+ * Quant orchestration (Phase 2a):
+ *  - nightly 3am MT: ratings update (Elo daily; market values added on Mondays)
+ *  - hourly: predict any match kicking off within 26h that lacks a fresh
+ *    (<12h old) prediction — approximates the T-24h/T-12h/T-2h cadence until
+ *    the full per-match pipeline arrives in Phase 3.
+ */
+function scheduleQuantJobs(): void {
+  let lastRatingsDay: string | null = null;
+
+  setInterval(async () => {
+    const { quantClient } = await import('../agents/orchestrator/quant_client');
+    const health = await quantClient.checkHealth();
+    if (!health) return; // quant service down — nothing to schedule
+
+    const tz = process.env.OPERATOR_TIMEZONE ?? 'America/Edmonton';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, hour: '2-digit', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short'
+    }).formatToParts(new Date());
+    const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? '';
+    const day = `${get('year')}-${get('month')}-${get('day')}`;
+
+    if (get('hour') === '03' && lastRatingsDay !== day) {
+      lastRatingsDay = day;
+      const mondays = get('weekday') === 'Mon';
+      quantClient.updateRatings(mondays).catch((err) => console.error('ratings update failed:', err));
+    }
+  }, 60 * 1000);
+
+  setInterval(async () => {
+    try {
+      const { quantClient } = await import('../agents/orchestrator/quant_client');
+      const health = await quantClient.checkHealth();
+      if (!health?.backtest_passed) return;
+
+      const { db } = await import('../db/index');
+      const { matches, model_predictions } = await import('../db/schema');
+      const { and, eq, gte, lte, desc } = await import('drizzle-orm');
+
+      const now = Date.now();
+      const upcoming = await db
+        .select({ id: matches.id })
+        .from(matches)
+        .where(and(
+          eq(matches.status, 'scheduled'),
+          gte(matches.scheduled_kickoff_utc, new Date(now)),
+          lte(matches.scheduled_kickoff_utc, new Date(now + 26 * 60 * 60 * 1000))
+        ));
+
+      for (const m of upcoming) {
+        const [latest] = await db
+          .select({ at: model_predictions.predicted_at })
+          .from(model_predictions)
+          .where(eq(model_predictions.match_id, m.id))
+          .orderBy(desc(model_predictions.predicted_at))
+          .limit(1);
+        const fresh = latest && now - latest.at.getTime() < 12 * 60 * 60 * 1000;
+        if (!fresh) {
+          await quantClient.predict(m.id).catch((err) =>
+            console.error(`quant predict failed for ${m.id}:`, err.message ?? err));
+        }
+      }
+    } catch (err) {
+      console.error('quant prediction sweep failed:', err);
+    }
+  }, 60 * 60 * 1000);
+}
 
 /** Daily fixtures re-sync at 4am MT (catches kickoff shifts, venue changes). */
 function scheduleDailyFixtureSync(): void {

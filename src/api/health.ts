@@ -81,6 +81,25 @@ async function runChecks(): Promise<{ healthy: boolean; checks: Record<string, C
     checks.bankroll_initialized = { status: 'fail', error: err instanceof Error ? err.message : String(err) };
   }
 
+  // Quant service (Phase 2a) — informational: a down Quant doesn't fail overall
+  // health; backtest_passed=false just hides model predictions on the dashboard.
+  try {
+    const { quantClient } = await import('../agents/orchestrator/quant_client');
+    const quant = await quantClient.checkHealth();
+    checks.quant_service = quant
+      ? {
+          status: 'ok',
+          url: process.env.QUANT_SERVICE_URL ?? 'http://localhost:8001',
+          model_version: quant.model_version,
+          backtest_passed: quant.backtest_passed,
+          backtest_brier: quant.backtest_brier ?? null,
+          last_rating_update: quant.last_rating_update ?? null
+        }
+      : { status: 'ok', note: 'quant service unreachable — model predictions hidden', reachable: false };
+  } catch (err) {
+    checks.quant_service = { status: 'ok', note: `quant check error: ${err instanceof Error ? err.message : String(err)}`, reachable: false };
+  }
+
   const healthy = Object.values(checks).every((c) => c.status === 'ok');
   return { healthy, checks };
 }
