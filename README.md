@@ -23,9 +23,9 @@ Everything else — team ratings, Elo, market values, xG, style profiles, roster
 ## Deploying on Replit
 
 1. Import this repo into Replit (the included `.replit` configures Node 22 + Python 3.12 and runs `scripts/start_all.sh`, which boots migrations → seed → Quant service (internal :8001) → web terminal on the exposed port).
-2. Create a [Neon](https://neon.tech) Postgres database and copy its connection string **with `?sslmode=require`**.
-3. In Replit **Secrets**, set: `DATABASE_URL`, `ODDS_API_KEY`, `ANTHROPIC_API_KEY` (optionally `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, `OPERATOR_TIMEZONE=America/Edmonton`). Never commit `.env`.
-4. **Publish as a Reserved VM deployment — NOT Autoscale.** Autoscale sleeps between requests, which kills the odds pollers and the T-24h/T-12h/T-2h/T-30min checkpoint schedulers.
+2. Enable **Replit PostgreSQL** (Database pane → create). Replit injects `DATABASE_URL` into the environment automatically — both the TypeScript and Python services read it from there; nothing else to configure.
+3. In Replit **Secrets**, set: `ODDS_API_KEY`, `ANTHROPIC_API_KEY` (optionally `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, `OPERATOR_TIMEZONE=America/Edmonton`). Never commit `.env`.
+4. **Publish as a Reserved VM deployment — NOT Autoscale.** Autoscale sleeps between requests, which kills the odds pollers and the T-24h/T-12h/T-2h/T-30min checkpoint schedulers. (Note: the deployment must be attached to the same Replit database — confirm `DATABASE_URL` is present in the deployment's environment.)
 5. First boot on a fresh database self-heals: migrations + lean seed run automatically, Elo/market values load immediately (instead of waiting for the 3am cron), and the backtest gate runs once (~2 min) so model predictions can display.
 6. Verify `https://<your-app>/health` shows all checks ok, then deposit your bankroll via the dashboard.
 
