@@ -3,11 +3,12 @@
  * Phase 1: manual bet placement, deposits, manual settlement.
  * (Full Treasurer — Kelly, stop-loss, CLV — arrives in Phase 4.)
  */
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, max } from 'drizzle-orm';
 import { db } from '../db/index';
 import { bankroll_ledger, bets } from '../db/schema';
 import { americanToDecimal } from './utils/odds';
 import { computeSettlement, type BetOutcome } from './utils/settlement';
+import { evaluateStopLossState } from '../agents/treasurer/stop_loss';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -89,6 +90,12 @@ export async function placeBet(args: PlaceBetArgs): Promise<{ bet_id: string; ba
 
     const potential_payout = BigInt(Math.round(Number(args.stake_cents) * decimal));
 
+    // Capture stop-loss state at placement (audit trail for Phase 4 CLV review)
+    const [peakRow] = await tx
+      .select({ peak: max(bankroll_ledger.balance_after_cents) })
+      .from(bankroll_ledger);
+    const stopLossAtPlacement = evaluateStopLossState(prior, peakRow?.peak ?? prior).level;
+
     const [bet] = await tx.insert(bets).values({
       verdict_id: null,  // manual placement — no CEO verdict in Phase 1
       match_id: args.match_id,
@@ -99,7 +106,8 @@ export async function placeBet(args: PlaceBetArgs): Promise<{ bet_id: string; ba
       american_odds: args.american_odds,
       decimal_odds: decimal.toFixed(4),
       potential_payout_cents: potential_payout,
-      settlement_status: 'pending'
+      settlement_status: 'pending',
+      stop_loss_state_at_placement: stopLossAtPlacement
     }).returning({ id: bets.id });
 
     const balance_after = prior - args.stake_cents;

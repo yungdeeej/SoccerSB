@@ -47,13 +47,17 @@ interface TelegramUpdate {
   message?: { chat: { id: number }; text?: string };
 }
 
+/** Command handlers: leading token (e.g. '/treasurer') → handler over remaining args. */
+export type CommandHandlers = Record<string, (args: string[]) => Promise<string>>;
+
 /**
- * Long-poll for commands. Phase 1 supports only /status.
- * statusFn builds the reply text on demand.
+ * Long-poll for operator commands. Only messages from TELEGRAM_CHAT_ID are
+ * honored — anything else is rejected without action.
  */
-export function startTelegramCommandLoop(statusFn: () => Promise<string>): void {
+export function startTelegramCommandLoop(handlers: CommandHandlers): void {
   const token = botToken();
-  if (!token || !chatId()) {
+  const authorizedChat = chatId();
+  if (!token || !authorizedChat) {
     console.warn('telegram: not configured — command loop disabled');
     return;
   }
@@ -76,9 +80,22 @@ export function startTelegramCommandLoop(statusFn: () => Promise<string>): void 
         for (const update of body.result ?? []) {
           offset = Math.max(offset, update.update_id + 1);
           const text = update.message?.text?.trim();
-          if (text === '/status') {
-            const reply = await statusFn();
-            await sendTelegramMessage(reply);
+          if (!text || !text.startsWith('/')) continue;
+
+          // Authenticate: only the operator's chat may issue commands
+          if (String(update.message?.chat.id) !== authorizedChat) {
+            console.warn(`telegram: rejected command from unauthorized chat ${update.message?.chat.id}`);
+            continue;
+          }
+
+          const [command, ...args] = text.split(/\s+/);
+          const handler = handlers[command];
+          if (handler) {
+            try {
+              await sendTelegramMessage(await handler(args));
+            } catch (err) {
+              await sendTelegramMessage(`Command failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
           }
         }
       } catch {

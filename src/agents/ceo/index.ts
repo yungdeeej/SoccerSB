@@ -12,7 +12,7 @@ import { logAgentRun } from '../wolfman/agent_log';
 import { runWolfman, type WolfmanOutput } from '../wolfman/index';
 import { runTactician } from '../tactician/index';
 import type { TacticianOutput } from '../tactician/types';
-import { computePlaceholderStake, getTreasurerSnapshot } from '../treasurer/stub';
+import { calculateStake, getTreasurerSnapshot } from '../treasurer/index';
 import { runAllGates } from './gates';
 import { computeStarRating } from './star_rating';
 import { generateVerdictWriteup, watchTrigger } from './writeup';
@@ -156,26 +156,52 @@ export async function runCEO(matchId: string, runPhase: CEOContext['run_phase'])
       };
 
       const gates = runAllGates(ctx);
-      const decision: Decision = gates.passed ? 'STRIKE' : gates.failure?.watch_eligible ? 'WATCH' : 'PASS';
+      let decision: Decision = gates.passed ? 'STRIKE' : gates.failure?.watch_eligible ? 'WATCH' : 'PASS';
+      let treasurerRejection: { gate: string; explanation: string } | null = null;
 
       const edgePct = adjustedEdge(ctx) * 100;
       const { stars } = computeStarRating(edgePct);
 
-      let stake: ReturnType<typeof computePlaceholderStake> | null = null;
+      // Real Treasurer sizing (Phase 4). A rejection flips STRIKE → PASS:
+      // the Treasurer's caps/cooldowns/halt are as un-bypassable as the gates.
+      let stake: { stake_cents: bigint; fraction: number; bankroll_pct: number; approved: boolean } | null = null;
       if (decision === 'STRIKE') {
-        stake = computePlaceholderStake({
+        const stakeResponse = await calculateStake({
+          match_id: matchId,
+          market,
+          side: ctx.side,
           adjusted_win_prob: adjustedProb,
+          american_odds: ctx.best_book_american,
           decimal_odds: ctx.best_book_decimal,
-          snapshot: treasurer,
-          low_confidence: ctx.low_confidence,
-          knockout_stage: knockout
+          book: ctx.best_book,
+          edge_pct: edgePct,
+          low_confidence_flag: ctx.low_confidence,
+          tournament_stage: match.stage
         });
+        if (stakeResponse.approved && stakeResponse.recommended_stake_cents !== null) {
+          stake = {
+            stake_cents: stakeResponse.recommended_stake_cents,
+            fraction: stakeResponse.kelly_fraction_used,
+            bankroll_pct: stakeResponse.bankroll_pct,
+            approved: true
+          };
+        } else {
+          decision = 'PASS';
+          treasurerRejection = {
+            gate: `treasurer_${stakeResponse.rejection_reason ?? 'rejected'}`,
+            explanation: stakeResponse.cap_reasoning
+          };
+        }
       }
+
+      const effectiveFailure = gates.failure ?? (treasurerRejection
+        ? { passed: false, gate: treasurerRejection.gate, explanation: treasurerRejection.explanation }
+        : null);
 
       const writeup = await generateVerdictWriteup({
         decision,
         ctx,
-        failure: gates.failure ?? null,
+        failure: effectiveFailure,
         stars,
         stake_dollars: stake ? Number(stake.stake_cents) / 100 : null,
         matchup,
@@ -211,7 +237,7 @@ export async function runCEO(matchId: string, runPhase: CEOContext['run_phase'])
           kelly_fraction_used: stake?.approved ? stake.fraction.toFixed(4) : null,
           bankroll_pct: stake?.approved ? stake.bankroll_pct.toFixed(2) : null,
           star_rating: decision === 'STRIKE' ? stars.toFixed(1) : null,
-          pass_reason: decision === 'PASS' ? gates.failure?.gate : null,
+          pass_reason: decision === 'PASS' ? effectiveFailure?.gate : null,
           watch_reason: decision === 'WATCH' ? gates.failure?.gate : null,
           watch_for: decision === 'WATCH' ? watchTrigger(gates.failure ?? null) : null,
           raw_edge_pct: ((tactician.raw_quant_probs.home_win_prob * ctx.best_book_decimal - 1) * 100).toFixed(3),
@@ -229,7 +255,10 @@ export async function runCEO(matchId: string, runPhase: CEOContext['run_phase'])
             llm_used: writeup.llm_used
           },
           discipline_gates_passed: gates.allResults.filter((r) => r.passed).map((r) => r.gate),
-          discipline_gates_failed: gates.allResults.filter((r) => !r.passed).map((r) => ({ gate: r.gate, explanation: r.explanation })),
+          discipline_gates_failed: [
+            ...gates.allResults.filter((r) => !r.passed).map((r) => ({ gate: r.gate, explanation: r.explanation })),
+            ...(treasurerRejection ? [treasurerRejection] : [])
+          ],
           expires_at: match.kickoff
         }).returning({ id: verdicts.id });
 
@@ -256,7 +285,7 @@ export async function runCEO(matchId: string, runPhase: CEOContext['run_phase'])
       } else if (prior[0]?.decision === 'STRIKE' && decision !== 'STRIKE') {
         await sendTelegramMessage(
           `⚠️ STRIKE DOWNGRADED (CRITICAL)\n\n${matchup} — ${market}\n` +
-          `Previous: STRIKE\nCurrent: ${decision}\n\nReason: ${gates.failure?.explanation ?? gates.failure?.gate}\n\n` +
+          `Previous: STRIKE\nCurrent: ${decision}\n\nReason: ${effectiveFailure?.explanation ?? effectiveFailure?.gate}\n\n` +
           `⚠️ If you already placed this bet, the market may move against you. Consider hedging or accepting the position.\n\n→ /verdicts/${verdictId}`
         );
       }

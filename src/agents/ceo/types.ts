@@ -1,7 +1,7 @@
 /** CEO types — gate context and verdict shapes (05_AGENT_CEO.md / 07 contracts). */
 import type { MarketAnalysis } from '../wolfman/index';
 import type { TacticianOutput } from '../tactician/types';
-import type { TreasurerSnapshot } from '../treasurer/stub';
+import type { TreasurerSnapshot } from '../treasurer/snapshot';
 
 export type Decision = 'STRIKE' | 'WATCH' | 'PASS';
 
