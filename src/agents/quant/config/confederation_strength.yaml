@@ -1,0 +1,8 @@
+# Base Elo priors per confederation — fallback ONLY when a team has no Elo rating
+# from any source (should not happen for World Cup qualifiers).
+UEFA: 1750
+CONMEBOL: 1750
+CONCACAF: 1600
+AFC: 1550
+CAF: 1550
+OFC: 1500

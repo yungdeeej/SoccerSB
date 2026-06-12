@@ -1,0 +1,77 @@
+# The Quant — model parameters (02_AGENT_QUANT.md)
+model_version: "1.0.0"
+
+bivariate_poisson:
+  goal_correlation: 0.08          # game-flow dependency
+  max_goals_grid: 7               # soccer is low-scoring
+  dc_rho: -0.06                   # Dixon-Coles low-score correction (backtest-calibrated)
+  joint_temper: 1.0               # entropy tempering for rating uncertainty (backtest-calibrated)
+
+draw_inflation:
+  factor: 1.06                    # backtest-calibrated on 2014-2024 majors; recalibrate after Matchday 2
+  recalibrate_after_matches: 32
+
+composite_rating:
+  elo_weight: 0.45
+  market_value_weight: 0.30
+  club_xg_weight: 0.25
+  # Low-data path (club xG aggregate missing or < 1000 weighted minutes)
+  low_data_elo_weight: 0.55
+  low_data_market_value_weight: 0.45
+  # Elo-only path (no market value either)
+  elo_only_weight: 1.0
+
+rating_to_goals:
+  base_goals_per_team: 1.32       # international average goals per team per match
+  alpha: 0.70                     # Elo-diff/400 → goal multiplier exponent (backtest-calibrated)
+
+venue_factor:
+  host_boosts:
+    MEX: 1.14
+    USA: 1.09
+    CAN: 1.08
+  generic_host_boost: 1.09        # used in backtests for past hosts
+  altitude_2000plus_swing: 0.06
+  altitude_1500_2000_swing: 0.03
+  travel_advantage_per_1000km: 0.01
+  travel_advantage_cap: 0.05
+
+weather_xg_modifier:
+  hot_above_30c: -0.30
+  hot_25_30c: -0.10
+  comfortable: 0.0
+  cold_below_5c: -0.10
+  heavy_rain: -0.20
+  light_rain: -0.05
+  high_wind_above_25kph: -0.10
+
+halftime:
+  first_half_goal_share: 0.45
+
+bootstrap:
+  iterations: 1000
+  seed: 20260611
+  ci_width_threshold: 0.10
+  rating_noise_sigma: 40.0        # Elo-points noise per resample
+
+lambda_bounds:
+  min: 0.3
+  max: 4.5
+
+tournament_stage_adjustments:
+  group_md1: 1.00
+  group_md2: 1.00
+  group_md3: 1.00
+  r32: 0.95
+  r16: 1.00
+  qf: 1.00
+  sf: 0.92
+  third: 1.00
+  final: 0.90
+
+calibration:
+  brier_target: 0.20
+
+data_freshness:
+  elo_max_age_days: 7
+  market_value_max_age_days: 30
