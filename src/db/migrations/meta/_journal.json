@@ -15,6 +15,13 @@
       "when": 1781216069255,
       "tag": "0001_large_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1781222451952,
+      "tag": "0002_violet_clint_barton",
+      "breakpoints": true
     }
   ]
 }

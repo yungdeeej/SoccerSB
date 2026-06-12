@@ -431,6 +431,11 @@ export const model_versions = pgTable('model_versions', {
   config_snapshot: jsonb('config_snapshot'),
   change_notes: text('change_notes'),
 
+  // Backtest gate (Phase 2a): no model predictions shown until a version passes
+  backtest_passed: boolean('backtest_passed').default(false),
+  backtest_brier: numeric('backtest_brier', { precision: 6, scale: 4 }),
+  backtest_median_clv_cents: numeric('backtest_median_clv_cents', { precision: 6, scale: 2 }),
+
   created_at: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 });
 
