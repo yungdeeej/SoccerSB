@@ -14,7 +14,7 @@
 
 <div class="panel">
   <div class="panel-head">
-    <span>A1 · TODAY'S SLATE · <span id="match-count">…</span> MATCHES</span>
+    <span>A1 · TODAY'S SLATE · <span id="match-count">…</span> MATCHES · <span id="strike-count" class="best"></span></span>
     <span>
       <button class="btn secondary" id="deposit-btn">+ DEPOSIT</button>
       <button class="btn" id="poll-btn">◆ RUN POLL</button>
@@ -31,11 +31,18 @@
 </div>
 
 <div class="panel">
-  <div class="panel-head"><span>B1 · EDGE BOARD — MARKET VIEW (no model edges until Phase 2)</span></div>
+  <div class="panel-head"><span>B1 · EDGE BOARD · <span id="board-summary" class="dim"></span></span>
+    <span>
+      <button class="btn secondary board-filter" data-f="ALL">ALL</button>
+      <button class="btn secondary board-filter" data-f="STRIKE">STRIKE</button>
+      <button class="btn secondary board-filter" data-f="WATCH">WATCH</button>
+    </span>
+  </div>
   <div class="panel-body">
     <table id="edge-board"><thead>
-      <tr><th>MATCHUP</th><th>MKT</th><th>SIDE</th><th>BOOK</th><th>ODDS</th><th>PIN</th><th>MOVEMENT</th></tr>
+      <tr><th>MATCHUP</th><th>MARKET</th><th>SIDE</th><th>BOOK</th><th>ODDS</th><th>EDGE</th><th>DEC</th><th>STARS</th></tr>
     </thead><tbody></tbody></table>
+    <div id="board-empty" class="dim" style="display:none; padding:6px 0">No verdicts yet — CEO runs at T-12h/T-2h/T-30min per match.</div>
   </div>
 </div>
 
@@ -75,23 +82,51 @@ async function refresh() {
       </tr>`).join('');
     document.getElementById('slate-empty').style.display = data.matches.length ? 'none' : 'block';
 
-    const eb = document.querySelector('#edge-board tbody');
-    eb.innerHTML = data.edge_board.map((s) => {
-      const { mkt, side } = marketLabel(s.market);
-      return `<tr>
-        <td>${s.matchup}</td><td>${mkt}</td><td>${side}</td>
-        <td class="dim">${s.best_book}</td>
-        <td class="best">${fmtOdds(s.best_book_american)}</td>
-        <td class="dim">${fmtOdds(s.pinnacle_current_american)}</td>
-        <td>${fmtMovement(s.total_movement_cents)}</td>
-      </tr>`;
-    }).join('');
+    document.getElementById('strike-count').textContent =
+      data.status.active_strikes > 0 ? `${data.status.active_strikes} STRIKE${data.status.active_strikes > 1 ? 'S' : ''}` : '';
+
+    lastBoard = data.edge_board ?? [];
+    renderBoard();
+    // Fallback to movement view when no verdicts exist yet
+    if (lastBoard.length === 0 && (data.movement_board ?? []).length > 0) {
+      document.querySelector('#edge-board tbody').innerHTML = data.movement_board.map((s) => {
+        const { mkt, side } = marketLabel(s.market);
+        return `<tr><td>${s.matchup}</td><td>${mkt}</td><td>${side}</td>
+          <td class="dim">${s.best_book}</td><td class="best">${fmtOdds(s.best_book_american)}</td>
+          <td>${fmtMovement(s.total_movement_cents)}</td><td class="dim">no verdict</td><td>—</td></tr>`;
+      }).join('');
+      document.getElementById('board-empty').style.display = 'none';
+    }
 
     renderFooter(document.getElementById('footer'), data.status);
   } catch (err) {
     console.error(err);
   }
 }
+
+let lastBoard = [];
+let boardFilter = 'ALL';
+
+function renderBoard() {
+  const rows = boardFilter === 'ALL' ? lastBoard : lastBoard.filter((v) => v.decision === boardFilter);
+  const badge = (d) => `<span class="${d === 'STRIKE' ? 'best' : d === 'WATCH' ? 'up' : 'dim'}">${d}</span>`;
+  document.querySelector('#edge-board tbody').innerHTML = rows.map((v) => `
+    <tr class="click" onclick="location.href='/verdicts/${v.id}'">
+      <td>${v.matchup}</td><td>${v.market}</td><td>${v.side}</td>
+      <td class="dim">${v.recommended_book ?? '—'}</td>
+      <td>${v.recommended_odds_american !== null ? fmtOdds(v.recommended_odds_american) : '—'}</td>
+      <td>${v.adjusted_edge_pct !== null ? Number(v.adjusted_edge_pct).toFixed(1) + '%' : '—'}</td>
+      <td>${badge(v.decision)}</td>
+      <td>${v.star_rating ? Number(v.star_rating).toFixed(1) + '★' : '—'}</td>
+    </tr>`).join('');
+  const strikes = lastBoard.filter((v) => v.decision === 'STRIKE').length;
+  const watches = lastBoard.filter((v) => v.decision === 'WATCH').length;
+  document.getElementById('board-summary').textContent = lastBoard.length ? `${strikes} STRIKE · ${watches} WATCH` : '';
+  document.getElementById('board-empty').style.display = lastBoard.length || boardFilter !== 'ALL' ? 'none' : 'block';
+}
+
+document.querySelectorAll('.board-filter').forEach((btn) =>
+  btn.addEventListener('click', () => { boardFilter = btn.dataset.f; renderBoard(); }));
 
 document.getElementById('poll-btn').addEventListener('click', async () => {
   const btn = document.getElementById('poll-btn');

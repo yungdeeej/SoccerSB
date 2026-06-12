@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>THE PITCH — Verdict</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="topbar">
+  <span class="brand"><a href="/" style="color:inherit">← SLATE</a></span>
+  <span class="meta" id="title">VERDICT</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span id="head">VERDICT</span><span class="dim" id="issued"></span></div>
+  <div class="panel-body" id="verdict-body"></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>DISCIPLINE GATES</span></div>
+  <div class="panel-body"><table id="gates"><tbody></tbody></table></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>AGENT INPUTS SNAPSHOT (AUDIT)</span></div>
+  <div class="panel-body"><pre id="snapshot" class="dim" style="white-space:pre-wrap; font-size:11px"></pre></div>
+</div>
+
+<div class="footer" id="footer"></div>
+
+<script type="module">
+import { api, fmtOdds, fmtMoney, renderFooter } from '/app.js';
+
+const verdictId = location.pathname.split('/').pop();
+
+function decisionBadge(d) {
+  const cls = d === 'STRIKE' ? 'best' : d === 'WATCH' ? 'up' : 'dim';
+  return `<span class="${cls}">${d}</span>`;
+}
+
+async function load() {
+  const data = await api(`/api/verdicts/${verdictId}`);
+  const v = data.verdict, m = data.match;
+
+  document.getElementById('title').textContent =
+    `${m.away_code} @ ${m.home_code} · ${v.market.toUpperCase()}`;
+  document.getElementById('head').innerHTML =
+    `${decisionBadge(v.decision)} — ${v.market} (${v.side})`;
+  document.getElementById('issued').textContent =
+    `${v.run_phase} · ${new Date(v.issued_at).toLocaleString('en-US', {timeZone:'America/Edmonton'})} MT`;
+
+  let body = '';
+  if (v.decision === 'STRIKE') {
+    body += `Recommended: <b class="best">${v.side} ${fmtOdds(v.recommended_odds_american)} @ ${v.recommended_book}</b>`;
+    if (v.recommended_stake_cents) body += ` · Stake ${fmtMoney(v.recommended_stake_cents)} (${v.bankroll_pct}% bankroll)`;
+    if (v.star_rating) body += ` · ${v.star_rating}★`;
+    body += '<br>';
+  }
+  body += `Edge: <b>${v.adjusted_edge_pct !== null ? Number(v.adjusted_edge_pct).toFixed(2) + '%' : '—'}</b> adjusted`;
+  if (v.pass_reason) body += ` · Pass reason: <span class="down">${v.pass_reason}</span>`;
+  if (v.watch_reason) body += ` · Watching: ${v.watch_reason} → ${v.watch_for}`;
+  if (data.superseded_by) {
+    body += `<br><span class="down">SUPERSEDED by ${data.superseded_by.decision} at ${new Date(data.superseded_by.issued_at).toLocaleString()} — <a href="/verdicts/${data.superseded_by.id}">view</a></span>`;
+  }
+  body += `<br><br><b>WALTERS WRITEUP</b><br>${v.walters_writeup ?? '—'}`;
+  if (data.market_intelligence?.market_signal_summary) {
+    body += `<br><br><b>WOLFMAN'S TAPE</b><br><span class="dim">${data.market_intelligence.market_signal_summary}</span>`;
+  }
+  document.getElementById('verdict-body').innerHTML = body;
+
+  const passed = (v.discipline_gates_passed ?? []).map((g) =>
+    `<tr><td class="up">✓</td><td>${g}</td><td class="dim">passed</td></tr>`);
+  const failed = (v.discipline_gates_failed ?? []).map((g) =>
+    `<tr><td class="down">✗</td><td>${g.gate ?? g}</td><td class="dim">${g.explanation ?? ''}</td></tr>`);
+  document.querySelector('#gates tbody').innerHTML = [...passed, ...failed].join('')
+    || '<tr><td class="dim">no gate data</td></tr>';
+
+  document.getElementById('snapshot').textContent = JSON.stringify(v.agent_inputs_snapshot, null, 2);
+  renderFooter(document.getElementById('footer'), await api('/api/status'));
+}
+
+load();
+</script>
+</body>
+</html>

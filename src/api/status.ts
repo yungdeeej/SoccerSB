@@ -1,9 +1,9 @@
 /**
  * System status aggregation — shared by the dashboard footer and Telegram /status.
  */
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, sql as rawSql } from 'drizzle-orm';
 import { db } from '../db/index';
-import { agent_runs, bets } from '../db/schema';
+import { agent_runs, bets, verdicts } from '../db/schema';
 import { getCurrentBalanceCents } from '../shared/ledger';
 import { getQuotaState } from '../agents/wolfman/poll';
 
@@ -15,6 +15,8 @@ export interface SystemStatus {
   last_fixtures_sync: string | null;
   api_credits_remaining: number | null;
   reduced_polling: boolean;
+  active_strikes: number;
+  llm_cost_today_usd: number;
 }
 
 async function lastRun(phase: string): Promise<string | null> {
@@ -52,6 +54,24 @@ export async function getSystemStatus(): Promise<SystemStatus> {
 
   const quota = getQuotaState();
 
+  // Active STRIKEs (not superseded, not expired)
+  const strikes = await db
+    .select({ id: verdicts.id })
+    .from(verdicts)
+    .where(and(
+      eq(verdicts.decision, 'STRIKE'),
+      isNull(verdicts.superseded_by),
+      gte(verdicts.expires_at, new Date())
+    ));
+
+  // Today's LLM spend from agent_runs outputs_summary
+  const [llmCost] = await db
+    .select({
+      total: rawSql<string>`COALESCE(SUM((outputs_summary->>'llm_cost_usd')::numeric), 0)`
+    })
+    .from(agent_runs)
+    .where(gte(agent_runs.ran_at, dayStart));
+
   return {
     bankroll_cents: Number(balance),
     todays_bet_count: todaysBets.length,
@@ -59,7 +79,9 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     last_odds_sync: await lastRun('odds_poll'),
     last_fixtures_sync: await lastRun('fixtures_sync'),
     api_credits_remaining: quota.creditsRemaining,
-    reduced_polling: quota.reducedMode
+    reduced_polling: quota.reducedMode,
+    active_strikes: strikes.length,
+    llm_cost_today_usd: Number(llmCost?.total ?? 0)
   };
 }
 

@@ -61,6 +61,8 @@ export function renderFooter(el, status) {
   el.innerHTML = `
     <span>BANKROLL <b>${fmtMoney(status.bankroll_cents)}</b></span>
     <span>TODAY'S BETS <b>${status.todays_bet_count}/${status.daily_bet_cap}</b></span>
+    <span>STRIKES <b class="${status.active_strikes > 0 ? 'best' : ''}">${status.active_strikes ?? 0}</b></span>
+    <span>LLM TODAY <b>$${(status.llm_cost_today_usd ?? 0).toFixed(2)}</b></span>
     <span>API CREDITS <b>${status.api_credits_remaining ?? '—'}${status.reduced_polling ? ' (REDUCED)' : ''}</b></span>
     <span>ODDS SYNC <b>${status.last_odds_sync ? timeAgo(status.last_odds_sync) : 'never'}</b></span>
     <span>FIXTURES <b>${status.last_fixtures_sync ? timeAgo(status.last_fixtures_sync) : 'never'}</b></span>

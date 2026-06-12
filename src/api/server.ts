@@ -23,6 +23,7 @@ app.use(express.static(PUBLIC_DIR));
 app.get('/', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'index.html')));
 app.get('/matches/:id', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'match.html')));
 app.get('/bets', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'bets.html')));
+app.get('/verdicts/:id', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'verdict.html')));
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -82,11 +83,14 @@ function scheduleTacticianJobs(): void {
         const due = CHECKPOINTS.filter((c) => hoursToKickoff <= c.hours).pop();
         if (!due) continue;
 
+        // T-24h: Tactician baseline only. T-12h/T-2h/T-30min: full CEO pipeline
+        // (CEO runs Tactician + Wolfman internally). Dedupe per owning agent.
+        const owningAgent = due.phase === 'T-24h' ? 'tactician' : 'ceo';
         const existing = await db
           .select({ id: agent_runs.id })
           .from(agent_runs)
           .where(and(
-            eq(agent_runs.agent, 'tactician'),
+            eq(agent_runs.agent, owningAgent),
             eq(agent_runs.match_id, m.id),
             eq(agent_runs.run_phase, due.phase),
             eq(agent_runs.status, 'success')
@@ -94,9 +98,15 @@ function scheduleTacticianJobs(): void {
           .limit(1);
         if (existing.length > 0) continue;
 
-        const { runTactician } = await import('../agents/tactician/index');
-        await runTactician(m.id, due.phase).catch((err) =>
-          console.error(`tactician ${due.phase} failed for ${m.id}:`, err instanceof Error ? err.message : err));
+        if (due.phase === 'T-24h') {
+          const { runTactician } = await import('../agents/tactician/index');
+          await runTactician(m.id, due.phase).catch((err) =>
+            console.error(`tactician ${due.phase} failed for ${m.id}:`, err instanceof Error ? err.message : err));
+        } else {
+          const { runCEO } = await import('../agents/ceo/index');
+          await runCEO(m.id, due.phase).catch((err) =>
+            console.error(`ceo ${due.phase} failed for ${m.id}:`, err instanceof Error ? err.message : err));
+        }
       }
     } catch (err) {
       console.error('tactician sweep failed:', err);

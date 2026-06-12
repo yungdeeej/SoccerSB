@@ -33,6 +33,21 @@
 </div>
 
 <div class="panel">
+  <div class="panel-head"><span>THE WOLFMAN'S TAPE</span></div>
+  <div class="panel-body" id="wolfman-panel"><span class="dim">loading…</span></div>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><span>CEO VERDICTS</span><button class="btn" id="ceo-btn">RUN CEO</button></div>
+  <div class="panel-body">
+    <table id="verdicts-table"><thead>
+      <tr><th>MARKET</th><th>SIDE</th><th>DECISION</th><th>EDGE</th><th>STARS</th><th>BOOK</th><th>STAKE</th><th></th></tr>
+    </thead><tbody></tbody></table>
+    <div id="verdicts-empty" class="dim" style="display:none; padding:6px 0">No verdicts yet — runs automatically at T-12h/T-2h/T-30min, or click RUN CEO.</div>
+  </div>
+</div>
+
+<div class="panel">
   <div class="panel-head"><span>MATCH OUTCOME (1X2)</span></div>
   <div class="panel-body">
     <table id="outcome"><thead>
@@ -145,6 +160,8 @@ async function refresh() {
 
   renderQuant(data.quant, m);
   renderTactician(data.tactician, m);
+  renderWolfman(data);
+  await renderVerdicts();
   renderFooter(document.getElementById('footer'), await api('/api/status'));
 
   // Populate bet modal markets
@@ -207,6 +224,54 @@ function renderTactician(t, m) {
     ${(t.flags ?? []).map((f) => `<span class="dim">• ${f}</span>`).join('<br>')}
     <br><span class="dim">coefficients v${t.coefficient_version} · ${new Date(t.computed_at).toLocaleString('en-US', { timeZone: 'America/Edmonton' })} MT · quality ${t.inputs_quality_score}/100</span>`;
 }
+
+function renderWolfman(data) {
+  const el = document.getElementById('wolfman-panel');
+  const states = data.market_states ?? [];
+  const intel = data.wolfman_intel;  // latest market_intelligence (may be null)
+  if (!intel || !intel.markets) {
+    el.innerHTML = '<span class="dim">No synthesis yet — Wolfman tape runs with the CEO at T-12h/T-2h/T-30min.</span>';
+    return;
+  }
+  const rows = Object.entries(intel.markets).slice(0, 12).map(([market, m]) => {
+    const sig = [];
+    if (m.steam?.detected) sig.push('<span class="down">STEAM</span>');
+    if (m.asian_western?.detected) sig.push('<span class="up">A/W GAP</span>');
+    if (m.line_freeze_detected) sig.push('<span class="down">FROZEN</span>');
+    if (m.timing?.signal && m.timing.signal !== 'neutral') sig.push(m.timing.signal);
+    return `<tr><td class="dim">${market}</td><td>${sig.join(' ') || '<span class="flat">quiet</span>'}</td>` +
+      `<td style="white-space:normal">${m.market_signal_summary ?? ''}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<table>${rows}</table>` +
+    (intel.cross_market_observations?.length
+      ? `<br>${intel.cross_market_observations.map((o) => `<span class="down">• ${o}</span>`).join('<br>')}`
+      : '');
+}
+
+async function renderVerdicts() {
+  const data = await api(`/api/matches/${matchId}/verdicts`);
+  const tbody = document.querySelector('#verdicts-table tbody');
+  const rows = data.verdicts ?? [];
+  const badge = (d) => `<span class="${d === 'STRIKE' ? 'best' : d === 'WATCH' ? 'up' : 'dim'}">${d}</span>`;
+  tbody.innerHTML = rows.map((v) => `
+    <tr class="click" onclick="location.href='/verdicts/${v.id}'">
+      <td>${v.market}</td><td>${v.side}</td><td>${badge(v.decision)}</td>
+      <td>${v.adjusted_edge_pct !== null ? Number(v.adjusted_edge_pct).toFixed(1) + '%' : '—'}</td>
+      <td>${v.star_rating ? Number(v.star_rating).toFixed(1) + '★' : '—'}</td>
+      <td class="dim">${v.recommended_book ?? '—'}</td>
+      <td>${v.recommended_stake_cents ? '$' + (v.recommended_stake_cents / 100).toFixed(0) : '—'}</td>
+      <td class="dim">${v.run_phase}</td>
+    </tr>`).join('');
+  document.getElementById('verdicts-empty').style.display = rows.length ? 'none' : 'block';
+}
+
+document.getElementById('ceo-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('ceo-btn');
+  btn.textContent = 'RUNNING…';
+  try { await api(`/api/matches/${matchId}/ceo/run`, { method: 'POST' }); } catch (e) { alert(e.message); }
+  btn.textContent = 'RUN CEO';
+  refresh();
+});
 
 function tStatus(t, side) {
   // xi status lives in flags via match_contexts; show from output fields if present

@@ -3,7 +3,7 @@
  */
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { asc, desc, eq, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
 import { matches, teams, venues, bets, model_predictions, model_versions, situational_adjustments, match_contexts } from '../db/schema';
@@ -82,22 +82,52 @@ apiRouter.get('/api/slate', async (_req: Request, res: Response) => {
       .where(gte(matches.scheduled_kickoff_utc, since))
       .orderBy(asc(matches.scheduled_kickoff_utc));
 
-    // Edge board: market states for the next 12 upcoming matches, 1X2 only on the slate
-    const upcoming = rows.filter((r) => r.status !== 'finished').slice(0, 12);
-    const edgeBoard: Array<MarketState & { matchup: string }> = [];
-    for (const m of upcoming) {
-      const states = await getMarketStates(m.id);
-      for (const s of states) {
-        if (s.market.startsWith('match_outcome_')) {
-          edgeBoard.push({ ...s, matchup: `${m.away_code} @ ${m.home_code}` });
+    // Edge board (Phase 3): live verdicts across upcoming matches, sorted by edge
+    const { verdicts } = await import('../db/schema');
+    const { isNull, inArray } = await import('drizzle-orm');
+    const upcoming = rows.filter((r) => r.status !== 'finished');
+    const matchupById = new Map(upcoming.map((m) => [m.id, `${m.away_code} @ ${m.home_code}`]));
+    let edgeBoard: Array<Record<string, unknown>> = [];
+    if (upcoming.length > 0) {
+      const verdictRows = await db
+        .select({
+          id: verdicts.id,
+          match_id: verdicts.match_id,
+          market: verdicts.market,
+          side: verdicts.side,
+          decision: verdicts.decision,
+          adjusted_edge_pct: verdicts.adjusted_edge_pct,
+          star_rating: verdicts.star_rating,
+          recommended_book: verdicts.recommended_book,
+          recommended_odds_american: verdicts.recommended_odds_american
+        })
+        .from(verdicts)
+        .where(and(
+          inArray(verdicts.match_id, upcoming.map((m) => m.id)),
+          isNull(verdicts.superseded_by)
+        ))
+        .orderBy(desc(verdicts.adjusted_edge_pct));
+      edgeBoard = verdictRows.map((v) => ({ ...v, matchup: matchupById.get(v.match_id) ?? '' }));
+    }
+
+    // Fallback for matches with odds but no verdicts yet: movement view (Phase 1 behavior)
+    const movementBoard: Array<MarketState & { matchup: string }> = [];
+    if (edgeBoard.length === 0) {
+      for (const m of upcoming.slice(0, 12)) {
+        const states = await getMarketStates(m.id);
+        for (const s of states) {
+          if (s.market.startsWith('match_outcome_')) {
+            movementBoard.push({ ...s, matchup: matchupById.get(m.id) ?? '' });
+          }
         }
       }
+      movementBoard.sort((a, b) => Math.abs(b.total_movement_cents) - Math.abs(a.total_movement_cents));
     }
-    edgeBoard.sort((a, b) => Math.abs(b.total_movement_cents) - Math.abs(a.total_movement_cents));
 
     res.json({
       matches: rows,
-      edge_board: edgeBoard.slice(0, 40),
+      edge_board: edgeBoard.slice(0, 60),
+      movement_board: movementBoard.slice(0, 40),
       status: await getSystemStatus()
     });
   } catch (err) {
@@ -173,11 +203,21 @@ apiRouter.get('/api/matches/:id', async (req: Request, res: Response) => {
       .orderBy(desc(match_contexts.captured_at))
       .limit(1);
 
+    // Latest Wolfman synthesis (Phase 3)
+    const { market_intelligence } = await import('../db/schema');
+    const [wolfmanIntel] = await db
+      .select()
+      .from(market_intelligence)
+      .where(eq(market_intelligence.match_id, req.params.id))
+      .orderBy(desc(market_intelligence.analyzed_at))
+      .limit(1);
+
     res.json({
       match: row,
       market_states: states,
       quant: { gate, latest_prediction: latestPrediction },
-      tactician: tactician ? { ...tactician, ...(lineup ?? {}) } : null
+      tactician: tactician ? { ...tactician, ...(lineup ?? {}) } : null,
+      wolfman_intel: wolfmanIntel ?? null
     });
   } catch (err) {
     errorOut(res, err);
@@ -326,6 +366,78 @@ apiRouter.post('/api/matches/:id/tactician/run', async (req: Request, res: Respo
     const { runTactician } = await import('../agents/tactician/index');
     const output = await runTactician(req.params.id, 'manual');
     res.json(output);
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CEO + verdicts (Phase 3)
+// ---------------------------------------------------------------------------
+
+apiRouter.post('/api/matches/:id/ceo/run', async (req: Request, res: Response) => {
+  try {
+    const { runCEO } = await import('../agents/ceo/index');
+    const result = await runCEO(req.params.id, 'manual');
+    res.json(result);
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+apiRouter.get('/api/matches/:id/verdicts', async (req: Request, res: Response) => {
+  try {
+    const { verdicts } = await import('../db/schema');
+    const { isNull } = await import('drizzle-orm');
+    const rows = await db
+      .select()
+      .from(verdicts)
+      .where(and(eq(verdicts.match_id, req.params.id), isNull(verdicts.superseded_by)))
+      .orderBy(desc(verdicts.adjusted_edge_pct));
+    res.json({
+      verdicts: rows.map((v) => ({
+        ...v,
+        recommended_stake_cents: v.recommended_stake_cents === null ? null : Number(v.recommended_stake_cents)
+      }))
+    });
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+apiRouter.get('/api/verdicts/:id', async (req: Request, res: Response) => {
+  try {
+    const { verdicts, market_intelligence } = await import('../db/schema');
+    const [v] = await db.select().from(verdicts).where(eq(verdicts.id, req.params.id)).limit(1);
+    if (!v) {
+      res.status(404).json({ error: 'Verdict not found' });
+      return;
+    }
+    const match = await loadMatchRow(v.match_id);
+    // Superseding verdict (if this one was replaced)
+    const [successor] = v.superseded_by
+      ? await db.select({ id: verdicts.id, decision: verdicts.decision, issued_at: verdicts.issued_at })
+          .from(verdicts).where(eq(verdicts.id, v.superseded_by)).limit(1)
+      : [];
+    const [intel] = await db
+      .select()
+      .from(market_intelligence)
+      .where(eq(market_intelligence.match_id, v.match_id))
+      .orderBy(desc(market_intelligence.analyzed_at))
+      .limit(1);
+    const marketIntel = intel
+      ? (intel.markets as Record<string, { market_signal_summary?: string }>)[v.market] ?? null
+      : null;
+
+    res.json({
+      verdict: {
+        ...v,
+        recommended_stake_cents: v.recommended_stake_cents === null ? null : Number(v.recommended_stake_cents)
+      },
+      match,
+      superseded_by: successor ?? null,
+      market_intelligence: marketIntel
+    });
   } catch (err) {
     errorOut(res, err);
   }
