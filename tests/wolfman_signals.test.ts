@@ -187,7 +187,14 @@ describe('CEO writeup templates (LLM fallback path)', () => {
         asian_western: { detected: false, magnitude_cents: 0, asian_implied_pct: null, western_implied_pct: null, actionable_side: null, explanation: null },
         sbobet_no_vig_prob: null,
         tactician: { flags: [], flagged_lineup_concerns: [], home_xi_status: 'confirmed', away_xi_status: 'confirmed', home_cluster_score: 0, away_cluster_score: 0, combined_advantage_home: 0.02, total_adjustment_capped: false } as never,
-        treasurer: { active_bankroll_cents: 500000n, available_capital_cents: 500000n, stop_loss_active: 'none', todays_bet_count: 0, daily_bet_cap: 5, current_kelly_fraction: 0.25 },
+        treasurer: {
+          active_bankroll_cents: 500000n, available_capital_cents: 500000n,
+          stop_loss_active: 'none', todays_bet_count: 0, daily_bet_cap: 5, current_kelly_fraction: 0.25,
+          total_capital_cents: 500000n, pending_wagers_cents: 0n, peak_bankroll_cents: 500000n,
+          peak_reached_at: null, drawdown_pct_from_peak: 0, stop_loss_reason: null,
+          stop_loss_resumes_at: null, todays_bets_by_match: new Map(), daily_bet_cap_effective: 5,
+          this_week_clv_cents: 0, rolling_30d_clv_cents: 0, clv_classification: 'marginal'
+        },
         already_bet_this_match_today: false
       },
       failure: decision === 'STRIKE' ? null : { passed: false, gate: 'edge_borderline', explanation: 'Edge 2.2% in borderline band', watch_eligible: decision === 'WATCH' },
