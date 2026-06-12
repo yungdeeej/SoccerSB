@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { asc, desc, eq, gte } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../db/index';
-import { matches, teams, venues, bets, model_predictions, model_versions } from '../db/schema';
+import { matches, teams, venues, bets, model_predictions, model_versions, situational_adjustments, match_contexts } from '../db/schema';
 import { getMarketStates, type MarketState } from '../agents/wolfman/market_state';
 import { pollTick } from '../agents/wolfman/poll';
 import { syncFixtures } from '../agents/wolfman/fixtures';
@@ -152,7 +152,33 @@ apiRouter.get('/api/matches/:id', async (req: Request, res: Response) => {
       latestPrediction = pred ?? null;
     }
 
-    res.json({ match: row, market_states: states, quant: { gate, latest_prediction: latestPrediction } });
+    // Latest Tactician adjustment + lineup snapshot (Phase 2b)
+    const [tactician] = await db
+      .select()
+      .from(situational_adjustments)
+      .where(eq(situational_adjustments.match_id, req.params.id))
+      .orderBy(desc(situational_adjustments.computed_at))
+      .limit(1);
+    const [lineup] = await db
+      .select({
+        home_xi_status: match_contexts.home_xi_status,
+        away_xi_status: match_contexts.away_xi_status,
+        home_xi_confidence: match_contexts.home_xi_confidence,
+        away_xi_confidence: match_contexts.away_xi_confidence,
+        home_cluster_score: match_contexts.home_cluster_score,
+        away_cluster_score: match_contexts.away_cluster_score
+      })
+      .from(match_contexts)
+      .where(eq(match_contexts.match_id, req.params.id))
+      .orderBy(desc(match_contexts.captured_at))
+      .limit(1);
+
+    res.json({
+      match: row,
+      market_states: states,
+      quant: { gate, latest_prediction: latestPrediction },
+      tactician: tactician ? { ...tactician, ...(lineup ?? {}) } : null
+    });
   } catch (err) {
     errorOut(res, err);
   }
@@ -286,6 +312,43 @@ apiRouter.get('/api/bets', async (_req: Request, res: Response) => {
 apiRouter.get('/api/status', async (_req: Request, res: Response) => {
   try {
     res.json(await getSystemStatus());
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Tactician (Phase 2b)
+// ---------------------------------------------------------------------------
+
+apiRouter.post('/api/matches/:id/tactician/run', async (req: Request, res: Response) => {
+  try {
+    const { runTactician } = await import('../agents/tactician/index');
+    const output = await runTactician(req.params.id, 'manual');
+    res.json(output);
+  } catch (err) {
+    errorOut(res, err);
+  }
+});
+
+const LineupOverrideBody = z.object({
+  side: z.enum(['home', 'away']),
+  xi_status: z.enum(['projected', 'leaked', 'confirmed']),
+  absences: z.array(z.object({
+    player_name: z.string().min(1),
+    reason: z.string().default('injured'),
+    position_group: z.enum(['goalkeeper', 'defender', 'midfielder', 'forward']),
+    is_captain: z.boolean().default(false),
+    is_key_player: z.boolean().default(false)
+  })).default([])
+});
+
+apiRouter.post('/api/matches/:id/lineup', async (req: Request, res: Response) => {
+  try {
+    const body = LineupOverrideBody.parse(req.body);
+    const { applyOperatorOverride } = await import('../agents/tactician/lineup');
+    const state = await applyOperatorOverride(req.params.id, body);
+    res.json(state);
   } catch (err) {
     errorOut(res, err);
   }

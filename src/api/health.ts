@@ -100,6 +100,27 @@ async function runChecks(): Promise<{ healthy: boolean; checks: Record<string, C
     checks.quant_service = { status: 'ok', note: `quant check error: ${err instanceof Error ? err.message : String(err)}`, reachable: false };
   }
 
+  // Tactician (Phase 2b) — config validity + last run
+  try {
+    const { getCoefficientVersion } = await import('../agents/tactician/config');
+    const { agent_runs } = await import('../db/schema');
+    const { and, desc: descOp, eq: eqOp } = await import('drizzle-orm');
+    const [lastRun] = await db
+      .select({ ran_at: agent_runs.ran_at, status: agent_runs.status, match_id: agent_runs.match_id })
+      .from(agent_runs)
+      .where(and(eqOp(agent_runs.agent, 'tactician')))
+      .orderBy(descOp(agent_runs.ran_at))
+      .limit(1);
+    checks.tactician = {
+      status: 'ok',
+      coefficient_version: getCoefficientVersion(),
+      last_run: lastRun?.ran_at.toISOString() ?? null,
+      last_run_status: lastRun?.status ?? null
+    };
+  } catch (err) {
+    checks.tactician = { status: 'fail', error: err instanceof Error ? err.message : String(err) };
+  }
+
   const healthy = Object.values(checks).every((c) => c.status === 'ok');
   return { healthy, checks };
 }

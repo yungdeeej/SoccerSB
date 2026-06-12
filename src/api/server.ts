@@ -43,7 +43,66 @@ app.listen(port, () => {
   startTelegramCommandLoop(async () => formatStatusForTelegram(await getSystemStatus()));
 
   scheduleQuantJobs();
+  scheduleTacticianJobs();
 });
+
+/**
+ * Tactician checkpoints (Phase 2b): T-24h, T-12h, T-2h, T-30min per match.
+ * A 5-minute sweep finds matches that crossed a checkpoint without a logged
+ * run (dedupe via agent_runs). Lineup state refreshes on every Tactician run
+ * plus dedicated passes at T-3h/T-90min/T-60min via the same sweep.
+ */
+function scheduleTacticianJobs(): void {
+  const CHECKPOINTS: Array<{ phase: 'T-24h' | 'T-12h' | 'T-2h' | 'T-30min'; hours: number }> = [
+    { phase: 'T-24h', hours: 24 },
+    { phase: 'T-12h', hours: 12 },
+    { phase: 'T-2h', hours: 2 },
+    { phase: 'T-30min', hours: 0.5 }
+  ];
+
+  setInterval(async () => {
+    try {
+      const { db } = await import('../db/index');
+      const { matches, agent_runs } = await import('../db/schema');
+      const { and, eq, gte, lte } = await import('drizzle-orm');
+
+      const now = Date.now();
+      const upcoming = await db
+        .select({ id: matches.id, kickoff: matches.scheduled_kickoff_utc })
+        .from(matches)
+        .where(and(
+          eq(matches.status, 'scheduled'),
+          gte(matches.scheduled_kickoff_utc, new Date(now)),
+          lte(matches.scheduled_kickoff_utc, new Date(now + 25 * 3600 * 1000))
+        ));
+
+      for (const m of upcoming) {
+        const hoursToKickoff = (m.kickoff.getTime() - now) / 3_600_000;
+        // The latest checkpoint we've crossed
+        const due = CHECKPOINTS.filter((c) => hoursToKickoff <= c.hours).pop();
+        if (!due) continue;
+
+        const existing = await db
+          .select({ id: agent_runs.id })
+          .from(agent_runs)
+          .where(and(
+            eq(agent_runs.agent, 'tactician'),
+            eq(agent_runs.match_id, m.id),
+            eq(agent_runs.run_phase, due.phase),
+            eq(agent_runs.status, 'success')
+          ))
+          .limit(1);
+        if (existing.length > 0) continue;
+
+        const { runTactician } = await import('../agents/tactician/index');
+        await runTactician(m.id, due.phase).catch((err) =>
+          console.error(`tactician ${due.phase} failed for ${m.id}:`, err instanceof Error ? err.message : err));
+      }
+    } catch (err) {
+      console.error('tactician sweep failed:', err);
+    }
+  }, 5 * 60 * 1000);
+}
 
 /**
  * Quant orchestration (Phase 2a):
